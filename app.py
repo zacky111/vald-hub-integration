@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import sys
 import os
+import time
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -44,10 +45,10 @@ def main():
         
         # API Status
         client = ValdHubClient()
-        api_connected = client.test_connection() if client.api_key else False
+        api_connected = client.get_token(client.client_id, client.client_secret)
         
         if api_connected:
-            st.success("✅ Connected to Vald Hub API")
+            st.success("✅ Connected to Vald Hub API. ")
         else:
             st.warning("⚠️ Using sample data (API not connected)")
             st.info("Configure `.env` file with your Vald Hub credentials")

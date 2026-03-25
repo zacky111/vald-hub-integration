@@ -3,6 +3,7 @@ import requests
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 import logging
+import time
 
 load_dotenv()
 
@@ -18,9 +19,66 @@ class ValdHubClient:
         self.client_secret = os.getenv('CLIENT_SECRET')
         self.tenant_id = os.getenv('TENANT_ID')
 
+        self.token_cache = {
+            "access_token": None,
+            "expires_at": None,
+        }
         
         if not self.client_id or not self.client_secret or not self.tenant_id:
             logger.warning("One or more required environment variables are not set")
+
+
+
+        
+    def get_token(self, client_id: str, client_secret: str) -> str:
+        """
+        Retrieves a bearer token with client credentials.
+        Caches token until expiration.
+
+        :param client_id: client ID from support
+        :param client_secret: client secret from support
+        :return: Authorization header value, e.g. "Bearer <token>"
+        """
+        now_ms = int(time.time() * 1000)
+        if (
+            self.token_cache["access_token"]
+            and self.token_cache["expires_at"]
+            and self.token_cache["expires_at"] > now_ms
+        ):
+            print("Returning cached token:", self.token_cache["access_token"])
+            return self.token_cache["access_token"]
+
+        url_auth = "https://auth.prd.vald.com/oauth/token"
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "audience": "vald-api-external",
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+        try:
+            resp = requests.post(url_auth, data=payload, headers=headers, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+
+            expires_in = data.get("expires_in")
+            access_token = data.get("access_token")
+            if not access_token or not expires_in:
+                raise ValueError("Missing access_token or expires_in in auth response")
+
+            bearer = f"Bearer {access_token}"
+            self.token_cache["access_token"] = bearer
+            self.token_cache["expires_at"] = now_ms + int(expires_in) * 1000
+
+            print("Caching new token:", self.token_cache)
+            return bearer
+
+        except requests.RequestException as e:
+            print("Error retrieving token:", str(e))
+            raise
+
+        
     
     def _make_request(self, endpoint: str, method: str = 'GET', params: Optional[Dict] = None) -> Optional[Dict]:
         """Make HTTP request to Vald Hub API"""

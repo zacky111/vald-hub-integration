@@ -68,33 +68,16 @@ def main():
             ["Overview", "Athlete Analysis", "Trends"]
         )
     
-    # Load or fetch data
-    if 'data' not in st.session_state:
-        with st.spinner("Loading athlete data..."):
-            # Try to get real data, fall back to sample
-            try:
-                client = ValdHubClient()
-                athletes = client.get_athletes()
-                if athletes:
-                    st.session_state.data = {
-                        'athletes': athletes,
-                        'metrics': {}
-                    }
-                else:
-                    st.session_state.data = create_sample_data()
-            except Exception as e:
-                st.warning(f"Could not fetch data: {e}. Using sample data.")
-                st.session_state.data = create_sample_data()
+
     
-    data = st.session_state.data
     
     # Main content based on display mode
     if display_mode == "Overview":
-        show_overview(data)
+        st.write("API Version: ", client.get_version())
     elif display_mode == "Athlete Analysis":
-        show_athlete_analysis(data)
+        pass
     else:
-        show_trends(data)
+        pass
 
 
 def show_overview(data):

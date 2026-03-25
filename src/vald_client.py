@@ -9,6 +9,11 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+url={
+    "auth": "https://auth.prd.vald.com/oauth/token",
+    "externalTenants_version": "https://prd-euw-api-externaltenants.valdperformance.com/version"
+}
+
 
 class ValdHubClient:
     """Client for interacting with Vald Hub API"""
@@ -48,7 +53,7 @@ class ValdHubClient:
             print("Returning cached token:", self.token_cache["access_token"])
             return self.token_cache["access_token"]
 
-        url_auth = "https://auth.prd.vald.com/oauth/token"
+
         payload = {
             "grant_type": "client_credentials",
             "client_id": client_id,
@@ -58,7 +63,7 @@ class ValdHubClient:
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
         try:
-            resp = requests.post(url_auth, data=payload, headers=headers, timeout=10)
+            resp = requests.post(url["auth"], data=payload, headers=headers, timeout=10)
             resp.raise_for_status()
             data = resp.json()
 
@@ -77,6 +82,28 @@ class ValdHubClient:
         except requests.RequestException as e:
             print("Error retrieving token:", str(e))
             raise
+
+    def get_version(self):
+        try:
+            response = requests.get(url["externalTenants_version"], timeout=10)
+            response.raise_for_status()
+
+            text = response.text
+            print("Status:", response.status_code)
+            print("Headers:", response.headers)
+            print("Body:", text)
+
+            try:
+                data = response.json()
+                print("JSON:", data)
+                return data
+            except ValueError:
+                # Jeśli serwer nie zwróci JSON, zwracamy tekst
+                return text
+
+        except requests.RequestException as e:
+            print("Error retrieving version:", str(e))
+            return None
 
         
     

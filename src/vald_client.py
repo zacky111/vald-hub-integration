@@ -13,15 +13,14 @@ class ValdHubClient:
     """Client for interacting with Vald Hub API"""
     
     def __init__(self):
-        self.api_key = os.getenv('VALD_HUB_API_KEY')
-        self.base_url = os.getenv('VALD_HUB_BASE_URL', 'https://api.vald-hub.com')
-        self.headers = {
-            'Authorization': f'Bearer {self.api_key}',
-            'Content-Type': 'application/json'
-        }
+
+        self.client_id = os.getenv('CLIENT_ID')
+        self.client_secret = os.getenv('CLIENT_SECRET')
+        self.tenant_id = os.getenv('TENANT_ID')
+
         
-        if not self.api_key:
-            logger.warning("VALD_HUB_API_KEY not set in environment variables")
+        if not self.client_id or not self.client_secret or not self.tenant_id:
+            logger.warning("One or more required environment variables are not set")
     
     def _make_request(self, endpoint: str, method: str = 'GET', params: Optional[Dict] = None) -> Optional[Dict]:
         """Make HTTP request to Vald Hub API"""
@@ -39,6 +38,9 @@ class ValdHubClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"API request failed: {e}")
             return None
+        
+
+    ## to be deleted
     
     def get_athletes(self) -> Optional[List[Dict]]:
         """Fetch list of athletes from Vald Hub"""

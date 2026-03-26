@@ -14,6 +14,7 @@ url={
     "auth": "https://auth.prd.vald.com/oauth/token",
     "externalTenants_version": "https://prd-euw-api-externaltenants.valdperformance.com/version",
     "get_profiles": "https://prd-euw-api-externalprofile.valdperformance.com/profiles",
+    "get_groups": "https://prd-euw-api-externaltenants.valdperformance.com/groups",
 }
 
 # Global token cache to persist across Streamlit reruns
@@ -130,3 +131,23 @@ class ValdHubClient:
         except Exception as e:
             logger.error(f"Error parsing profiles: {e}")
             return None
+
+    def get_groups(self) -> Optional[Dict]:
+        """Fetch groups from Vald Hub"""
+        try:
+            response = requests.get(
+                url["get_groups"], 
+                timeout=10,
+                params={"TenantID": self.tenant_id},
+                headers={"Authorization": self.get_token(self.client_id, self.client_secret)}
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data
+        except requests.RequestException as e:
+            logger.error(f"Error fetching groups: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error parsing groups: {e}")
+            return None
+        

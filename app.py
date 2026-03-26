@@ -108,6 +108,31 @@ def main():
         
         st.divider()
         
+        # Group Selection
+        st.subheader("Select Group")
+        try:
+            groups_data = client.get_groups()
+            
+            if groups_data and 'groups' in groups_data:
+                groups = groups_data['groups']
+                group_names = [g.get('name', 'Unknown') for g in groups]
+                
+                if group_names:
+                    selected_group = st.selectbox(
+                        "Choose group",
+                        sorted(group_names),
+                        key="group_selector"
+                    )
+                    st.session_state.selected_group = selected_group
+                else:
+                    st.warning("No groups found")
+            else:
+                st.warning("Could not load groups")
+        except Exception as e:
+            st.error(f"Error loading groups: {str(e)}")
+
+        st.divider()
+        
         # Settings
         st.subheader("Settings")
         display_mode = st.radio(

@@ -1,3 +1,5 @@
+from xmlrpc import client
+
 from plotly import data
 import streamlit as st
 import pandas as pd
@@ -48,6 +50,7 @@ def main():
     
     # Sidebar
     with st.sidebar:
+
         st.header("Configuration")
         
         # Get cached client instance
@@ -72,11 +75,15 @@ def main():
             st.rerun()
         
         st.divider()
+
+
+        #obtaining data for dropdowns
+        profiles_data = client.get_profiles()
+        groups_data = client.get_groups()
         
         # Athlete Selection
         st.subheader("Select Athlete")
         try:
-            profiles_data = client.get_profiles()
             
             if profiles_data and 'profiles' in profiles_data:
                 athletes = profiles_data['profiles']
@@ -92,6 +99,16 @@ def main():
                         key="athlete_selector"
                     )
                     st.session_state.selected_athlete = selected_athlete
+                    
+                    #to be deleted later on
+                    athlete_id = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('profileId', 'N/A')
+                    st.write(f"**Athlete ID:** {athlete_id}")
+
+                    athlete_details = client.get_profiles_details(athlete_id)
+                    st.write(f"**Athlete Groups - ID:** {athlete_details['groupIds']}")
+                    
+                    group_details = client.get_group_details(athlete_details['groupIds'][0]) if athlete_details['groupIds'] else None
+                    st.write(f"**Athlete Groups - Name:** {group_details['name'] if group_details['name'] != '' else 'N/A'}")
 
                     athlete_weight = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('weight', 'N/A')
                     athlete_date_of_birth = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('dateOfBirth', 'N/A')
@@ -111,7 +128,7 @@ def main():
         # Group Selection
         st.subheader("Select Group")
         try:
-            groups_data = client.get_groups()
+            
             
             if groups_data and 'groups' in groups_data:
                 groups = groups_data['groups']

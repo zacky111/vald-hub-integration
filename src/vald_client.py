@@ -151,3 +151,42 @@ class ValdHubClient:
             logger.error(f"Error parsing groups: {e}")
             return None
         
+    def get_profiles_details(self, profile_id: str) -> Optional[Dict]:
+        """Fetch detailed profile data for a specific athlete"""
+        try:
+            response = requests.get(
+                f"{url['get_profiles']}/{profile_id}", 
+                timeout=10, 
+                params={"TenantID": self.tenant_id}, 
+                headers={"Authorization": self.get_token(self.client_id, self.client_secret)}
+            )
+            response.raise_for_status()
+            data = response.json()
+            print(data)
+            return data
+        except requests.RequestException as e:
+            logger.error(f"Error fetching profile details: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error parsing profile details: {e}")
+            return None
+        
+    def get_group_details(self, group_id: str) -> Optional[Dict]:
+        """Fetch detailed data for a specific group"""
+        try:
+            response = requests.get(
+                f"{url['get_groups']}/{group_id}", 
+                timeout=10, 
+                params={"TenantID": self.tenant_id}, 
+                headers={"Authorization": self.get_token(self.client_id, self.client_secret)}
+            )
+            response.raise_for_status()
+            data = response.json()
+            print(data)
+            return data
+        except requests.RequestException as e:
+            logger.error(f"Error fetching group details: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error parsing group details: {e}")
+            return None

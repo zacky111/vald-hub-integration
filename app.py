@@ -1,3 +1,4 @@
+from plotly import data
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -18,6 +19,12 @@ from src.visualizations import (
 )
 
 
+@st.cache_resource
+def get_vald_client():
+    """Get cached ValdHubClient instance - persists across Streamlit reruns"""
+    return ValdHubClient()
+
+
 def main():
     st.set_page_config(
         page_title="Vald Hub Dashboard",
@@ -36,28 +43,68 @@ def main():
     """, unsafe_allow_html=True)
     
     # Header
-    st.title("⚡ Vald Hub Performance Dashboard")
+    st.title("Vald Hub Performance Dashboard")
     st.markdown("*Real-time athlete performance monitoring and analysis*")
     
     # Sidebar
     with st.sidebar:
         st.header("Configuration")
         
-        # API Status
-        client = ValdHubClient()
-        api_connected = client.get_token(client.client_id, client.client_secret)
+        # Get cached client instance
+        client = get_vald_client()
         
-        if api_connected:
-            st.success("✅ Connected to Vald Hub API. ")
-        else:
-            st.warning("⚠️ Using sample data (API not connected)")
-            st.info("Configure `.env` file with your Vald Hub credentials")
+        # API Status
+        try:
+            api_connected = client.get_token(client.client_id, client.client_secret)
+            
+            if api_connected:
+                st.success("✅ Connected to Vald Hub API. ")
+            else:
+                st.warning("⚠️ Using sample data (API not connected)")
+                st.info("Configure `.env` file with your Vald Hub credentials")
+        except Exception as e:
+            st.error(f"API Error: {str(e)}")
         
         # Refresh data
         if st.button("🔄 Refresh Data", use_container_width=True):
             if 'data' in st.session_state:
                 del st.session_state.data
             st.rerun()
+        
+        st.divider()
+        
+        # Athlete Selection
+        st.subheader("Select Athlete")
+        try:
+            profiles_data = client.get_profiles()
+            
+            if profiles_data and 'profiles' in profiles_data:
+                athletes = profiles_data['profiles']
+                athlete_names = [
+                    f"{a.get('familyName', '')} {a.get('givenName', 'Unknown')}" 
+                    for a in athletes
+                ]
+                
+                if athlete_names:
+                    selected_athlete = st.selectbox(
+                        "Choose athlete",
+                        sorted(athlete_names),
+                        key="athlete_selector"
+                    )
+                    st.session_state.selected_athlete = selected_athlete
+
+                    athlete_weight = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('weight', 'N/A')
+                    athlete_date_of_birth = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('dateOfBirth', 'N/A')
+
+                    st.write(f"**Weight:** {athlete_weight} kg")
+                    st.write(f"**Date of Birth:** {athlete_date_of_birth[:10 if athlete_date_of_birth != 'N/A' else None]}")  # Show only date part
+
+                else:
+                    st.warning("No athletes found")
+            else:
+                st.warning("Could not load athletes")
+        except Exception as e:
+            st.error(f"Error loading athletes: {str(e)}")
         
         st.divider()
         
@@ -73,91 +120,15 @@ def main():
     
     # Main content based on display mode
     if display_mode == "Overview":
-        st.write("API Version: ", client.get_version())
+        try:
+            st.write("API Version: ", client.get_version())
+        except Exception as e:
+            st.error(f"Could not fetch data: {str(e)}")
     elif display_mode == "Athlete Analysis":
         pass
     else:
         pass
-
-
-def show_overview(data):
-    """Display overview dashboard"""
-    st.header("Performance Overview")
     
-    # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Total Athletes", len(data['athletes']))
-    with col2:
-        st.metric("Avg Force", f"{sum(data['metrics']['force_data']) / len(data['metrics']['force_data']):.0f} N")
-    with col3:
-        st.metric("Avg Power", f"{sum(data['metrics']['power_data']) / len(data['metrics']['power_data']):.0f} W")
-    with col4:
-        st.metric("Avg Velocity", f"{sum(data['metrics']['velocity_data']) / len(data['metrics']['velocity_data']):.2f} m/s")
-    
-    st.divider()
-    
-    # Visualizations
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.plotly_chart(create_force_plot(data), use_container_width=True)
-    with col2:
-        st.plotly_chart(create_power_velocity_plot(data), use_container_width=True)
-    
-    st.plotly_chart(create_metrics_comparison(data), use_container_width=True)
-    
-    # Athletes table
-    st.subheader("Athletes List")
-    athletes_df = create_athlete_summary(data['athletes'])
-    st.dataframe(athletes_df, use_container_width=True)
-
-
-def show_athlete_analysis(data):
-    """Display individual athlete analysis"""
-    st.header("Athlete Analysis")
-    
-    athletes_list = [a.get('name', f"Athlete {a.get('id')}") for a in data['athletes']]
-    selected_athlete = st.selectbox("Select Athlete", athletes_list)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.plotly_chart(create_force_plot(data, selected_athlete), use_container_width=True)
-    with col2:
-        st.plotly_chart(create_power_velocity_plot(data, selected_athlete), use_container_width=True)
-
-
-def show_trends(data):
-    """Display trends analysis"""
-    st.header("Performance Trends")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Force Trend")
-        st.plotly_chart(create_force_plot(data), use_container_width=True)
-    
-    with col2:
-        st.subheader("Metrics Comparison")
-        st.plotly_chart(create_metrics_comparison(data), use_container_width=True)
-    
-    # Statistics
-    st.subheader("Statistics")
-    col1, col2, col3 = st.columns(3)
-    
-    force_data = data['metrics']['force_data']
-    power_data = data['metrics']['power_data']
-    velocity_data = data['metrics']['velocity_data']
-    
-    with col1:
-        st.metric("Force Range", f"{max(force_data) - min(force_data):.0f} N")
-    with col2:
-        st.metric("Power Range", f"{max(power_data) - min(power_data):.0f} W")
-    with col3:
-        st.metric("Velocity Range", f"{max(velocity_data) - min(velocity_data):.2f} m/s")
-
 
 if __name__ == "__main__":
     main()

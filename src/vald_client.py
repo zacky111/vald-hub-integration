@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 import logging
 import time
+import json
 
 load_dotenv()
 
@@ -11,7 +12,14 @@ logger = logging.getLogger(__name__)
 
 url={
     "auth": "https://auth.prd.vald.com/oauth/token",
-    "externalTenants_version": "https://prd-euw-api-externaltenants.valdperformance.com/version"
+    "externalTenants_version": "https://prd-euw-api-externaltenants.valdperformance.com/version",
+    "get_profiles": "https://prd-euw-api-externalprofile.valdperformance.com/profiles",
+}
+
+# Global token cache to persist across Streamlit reruns
+_token_cache = {
+    "access_token": None,
+    "expires_at": None,
 }
 
 
@@ -23,11 +31,6 @@ class ValdHubClient:
         self.client_id = os.getenv('CLIENT_ID')
         self.client_secret = os.getenv('CLIENT_SECRET')
         self.tenant_id = os.getenv('TENANT_ID')
-
-        self.token_cache = {
-            "access_token": None,
-            "expires_at": None,
-        }
         
         if not self.client_id or not self.client_secret or not self.tenant_id:
             logger.warning("One or more required environment variables are not set")
@@ -38,22 +41,25 @@ class ValdHubClient:
     def get_token(self, client_id: str, client_secret: str) -> str:
         """
         Retrieves a bearer token with client credentials.
-        Caches token until expiration.
+        Caches token globally until expiration to persist across Streamlit reruns.
 
         :param client_id: client ID from support
         :param client_secret: client secret from support
         :return: Authorization header value, e.g. "Bearer <token>"
         """
+        global _token_cache
+        
         now_ms = int(time.time() * 1000)
         if (
-            self.token_cache["access_token"]
-            and self.token_cache["expires_at"]
-            and self.token_cache["expires_at"] > now_ms
+            _token_cache["access_token"]
+            and _token_cache["expires_at"]
+            and _token_cache["expires_at"] > now_ms
         ):
-            print("Returning cached token:", self.token_cache["access_token"])
-            return self.token_cache["access_token"]
+            logger.info("Using cached token (valid for ~%d min)", 
+                       (_token_cache["expires_at"] - now_ms) // 60000)
+            return _token_cache["access_token"]
 
-
+        logger.info("Fetching new token from auth server...")
         payload = {
             "grant_type": "client_credentials",
             "client_id": client_id,
@@ -73,14 +79,14 @@ class ValdHubClient:
                 raise ValueError("Missing access_token or expires_in in auth response")
 
             bearer = f"Bearer {access_token}"
-            self.token_cache["access_token"] = bearer
-            self.token_cache["expires_at"] = now_ms + int(expires_in) * 1000
+            _token_cache["access_token"] = bearer
+            _token_cache["expires_at"] = now_ms + int(expires_in) * 1000
 
-            print("Caching new token:", self.token_cache)
+            logger.info("New token cached (expires in %d hours)", expires_in // 3600)
             return bearer
 
         except requests.RequestException as e:
-            print("Error retrieving token:", str(e))
+            logger.error("Error retrieving token: %s", str(e))
             raise
 
     def get_version(self):
@@ -89,9 +95,9 @@ class ValdHubClient:
             response.raise_for_status()
 
             text = response.text
-            print("Status:", response.status_code)
-            print("Headers:", response.headers)
-            print("Body:", text)
+            #print("Status:", response.status_code)
+            #print("Headers:", response.headers)
+            #print("Body:", text)
 
             try:
                 data = response.json()
@@ -105,52 +111,22 @@ class ValdHubClient:
             print("Error retrieving version:", str(e))
             return None
 
-        
-    
-    def _make_request(self, endpoint: str, method: str = 'GET', params: Optional[Dict] = None) -> Optional[Dict]:
-        """Make HTTP request to Vald Hub API"""
+    def get_profiles(self) -> Optional[Dict]:
+        """Fetch athlete profiles from Vald Hub"""
         try:
-            url = f"{self.base_url}{endpoint}"
-            response = requests.request(
-                method=method,
-                url=url,
-                headers=self.headers,
-                params=params,
-                timeout=10
+            response = requests.get(
+                url["get_profiles"], 
+                timeout=10, 
+                params={"TenantID": self.tenant_id}, 
+                headers={"Authorization": self.get_token(self.client_id, self.client_secret)}
             )
             response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"API request failed: {e}")
+            data = response.json()
+            
+            return data
+        except requests.RequestException as e:
+            logger.error(f"Error fetching profiles: {e}")
             return None
-        
-
-    ## to be deleted
-    
-    def get_athletes(self) -> Optional[List[Dict]]:
-        """Fetch list of athletes from Vald Hub"""
-        result = self._make_request('/athletes')
-        return result.get('data', []) if result else []
-    
-    def get_athlete_data(self, athlete_id: str) -> Optional[Dict]:
-        """Fetch specific athlete performance data"""
-        return self._make_request(f'/athletes/{athlete_id}')
-    
-    def get_assessments(self, athlete_id: Optional[str] = None) -> Optional[List[Dict]]:
-        """Fetch assessments, optionally filtered by athlete"""
-        params = {'athlete_id': athlete_id} if athlete_id else None
-        result = self._make_request('/assessments', params=params)
-        return result.get('data', []) if result else []
-    
-    def get_assessment_details(self, assessment_id: str) -> Optional[Dict]:
-        """Fetch detailed assessment data"""
-        return self._make_request(f'/assessments/{assessment_id}')
-    
-    def get_metrics(self, athlete_id: str) -> Optional[Dict]:
-        """Fetch performance metrics for an athlete"""
-        return self._make_request(f'/metrics/{athlete_id}')
-    
-    def test_connection(self) -> bool:
-        """Test connection to Vald Hub API"""
-        result = self._make_request('/health')
-        return result is not None
+        except Exception as e:
+            logger.error(f"Error parsing profiles: {e}")
+            return None

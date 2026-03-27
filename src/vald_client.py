@@ -190,61 +190,77 @@ class ValdHubClient:
             logger.error(f"Error parsing group details: {e}")
             return None
 
-    def get_training_sessions(self, profile_id=None) -> Optional[Dict]:
-        "Retrieves a list of ForceDecks training sessions."
+    def get_training_sessions(
+        self,
+        profile_id=None,
+        modified_from_utc="2026-01-01T00:00:00.000Z",
+        page_size=100,
+        page_number=1,
+        fetch_all=False,
+    ) -> Optional[Dict]:
+        "Retrieves a list of ForceDecks training sessions. Supports paging."
 
+        date = modified_from_utc or "2026-01-01T00:00:00.000Z"
 
-        date="2026-01-01T00:00:00.000Z"
+        def _fetch_page(page_num):
+            params = {
+                "TenantId": str(self.tenant_id),
+                "ModifiedFromUtc": date,
+                "PageSize": page_size,
+                "Page": page_num,
+            }
+            if profile_id:
+                params["ProfileId"] = profile_id
 
-        if profile_id is None:
-            params = {"TenantId": str(self.tenant_id),
-                      "ModifiedFromUtc": date}
-            
-            try:
-                response = requests.get(
-                    url["get_training_sessions"],
-                    timeout=10,
-                    params=params,
-                    headers={"Authorization": self.get_token(self.client_id, self.client_secret)}
-                )
-                response.raise_for_status()
-                data = response.json()
+            response = requests.get(
+                url["get_training_sessions"],
+                timeout=10,
+                params=params,
+                headers={"Authorization": self.get_token(self.client_id, self.client_secret)},
+            )
+            response.raise_for_status()
+            return response.json()
+
+        try:
+            if not fetch_all:
+                data = _fetch_page(page_number)
                 return data
-            except requests.RequestException as e:
-                logger.error(f"Error fetching training sessions: {e}")
-                return None
-            except Exception as e:
-                logger.error(f"Error parsing training sessions: {e}")
-                return None
-            
-        else:
-            params = {"TenantId": str(self.tenant_id), 
-                      "ModifiedFromUtc": date, 
-                      "ProfileId": profile_id}
-            print(f"Params: {params}")
-            try:
-                response = requests.get(
-                    url["get_training_sessions"],
-                    timeout=10,
-                    params=params,
-                    headers={"Authorization": self.get_token(self.client_id, self.client_secret)}
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data
-            except requests.RequestException as e:
-                logger.error(f"Error fetching training sessions: {e}")
-                return None
-            except Exception as e:
-                logger.error(f"Error parsing training sessions: {e}")
-                return None
+
+            # Fetch all pages iteratively
+            aggregated = {"tests": []}
+            current_page = page_number
+            while True:
+                data = _fetch_page(current_page)
+                tests = data.get("tests", [])
+                aggregated["tests"].extend(tests)
+
+                # If backend field exists for page count/next token, use it; fallback on page_size
+                next_page_exists = False
+                if "pageCount" in data and "page" in data:
+                    next_page_exists = data.get("page") < data.get("pageCount")
+                elif len(tests) >= page_size:
+                    next_page_exists = True
+
+                if not next_page_exists:
+                    break
+
+                current_page += 1
+
+            return aggregated
+
+        except requests.RequestException as e:
+            logger.error(f"Error fetching training sessions: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error parsing training sessions: {e}")
+            return None
             
     def get_test_details(self, teamId, testId) -> Optional[Dict]:
         """Fetch detailed data for a specific test/training session"""
         try:
 
-            print("teamId:", teamId)
-            print("testId:", testId)
+            #print("teamId:", teamId)
+            #print("testId:", testId)
             response = requests.get(
                 url=f"https://prd-euw-api-extforcedecks.valdperformance.com/v2019q3/teams/{teamId}/tests/{testId}/trials", 
                 timeout=10,  
@@ -252,7 +268,7 @@ class ValdHubClient:
             )
             response.raise_for_status()
             data = response.json()
-            print(data)
+            #print(data)
 
             return data
         except requests.RequestException as e:

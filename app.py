@@ -137,8 +137,11 @@ def main():
                     athlete_weight = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('weight', 'N/A')
                     athlete_date_of_birth = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('dateOfBirth', 'N/A')
 
-                    st.write(f"**Weight:** {athlete_weight} kg")
-                    st.write(f"**Date of Birth:** {athlete_date_of_birth[:10 if athlete_date_of_birth != 'N/A' else None]}")  # Show only date part
+                    col1, col2 = st.columns(2)
+                    #st.write(f"**Weight:** {athlete_weight} kg")
+                    col1.metric("Weight (kg)", athlete_weight)
+                    #st.write(f"**Date of Birth:** {athlete_date_of_birth[:10 if athlete_date_of_birth != 'N/A' else None]}")  # Show only date part
+                    col2.metric("Date of Birth", athlete_date_of_birth[:10 if athlete_date_of_birth != 'N/A' else None])
 
                 else:
                     st.warning("No athletes found")
@@ -192,7 +195,41 @@ def main():
         try:
             st.header("Training Sessions Overview")
 
-            data = client.get_training_sessions(profile_id=athlete_id)
+            # Date filter for training sessions
+            default_from = datetime.now().date() - pd.Timedelta(days=30)
+            modified_from = st.date_input(
+                "Show sessions from date:",
+                value=default_from,
+                key="modified_from"
+            )
+
+            page_size = st.number_input(
+                "Ile rekordów na stronę?",
+                min_value=10,
+                max_value=500,
+                value=100,
+                step=10,
+                key="page_size"
+            )
+
+            fetch_all = st.checkbox(
+                "Pobierz wszystkie strony (może działać dłużej)",
+                value=True,
+                key="fetch_all"
+            )
+
+            # Convert to API-required UTC ISO format
+            modified_from_utc = datetime.combine(modified_from, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+            st.caption(f"Aktualny filtr daty: od {modified_from_utc}")
+
+            data = client.get_training_sessions(
+                profile_id=athlete_id,
+                modified_from_utc=modified_from_utc,
+                page_size=page_size,
+                page_number=1,
+                fetch_all=fetch_all,
+            )
             if data and "tests" in data:
                 tests_list = data["tests"]
                 if tests_list:
@@ -292,7 +329,7 @@ def main():
                                         # For simplicity, show detailed results from the first trial
                                         # You can add a selector for multiple trials if needed
                                         trial = specific_test_details[0]
-                                        st.subheader(f"Detailed Results from Trial 1 (ID: {trial.get('id', 'N/A')})")
+                                        #t.subheader(f"Detailed Results from Trial 1 (ID: {trial.get('id', 'N/A')})")
                                         
                                         if 'results' in trial and trial['results']:
                                             results = trial['results']
@@ -310,17 +347,17 @@ def main():
                                                 } for r in results
                                             ])
                                             
-                                            st.dataframe(df_results, use_container_width=True)
+                                            #st.dataframe(df_results, use_container_width=True)
                                             
                                             # Summary stats
-                                            st.write(f"**Total metrics:** {len(results)}")
+                                            #st.write(f"**Total metrics:** {len(results)}")
                                             
                                             # Optional: Highlight key metrics
-                                            key_metrics = ['Bodyweight', 'Countermovement Depth', 'Start of Movement']
-                                            filtered_df = df_results[df_results['Metric Name'].str.contains('|'.join(key_metrics), case=False, na=False)]
-                                            if not filtered_df.empty:
-                                                st.subheader("Key Performance Metrics")
-                                                st.dataframe(filtered_df, use_container_width=True)
+                                            #key_metrics = ['Bodyweight', 'Countermovement Depth', 'Start of Movement']
+                                            #filtered_df = df_results[df_results['Metric Name'].str.contains('|'.join(key_metrics), case=False, na=False)]
+                                            #if not filtered_df.empty:
+                                            #    st.subheader("Key Performance Metrics")
+                                            #    st.dataframe(filtered_df, use_container_width=True)
                                             
                                             # Visualizations
                                             st.subheader("Performance Visualizations")

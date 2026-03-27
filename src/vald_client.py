@@ -15,6 +15,7 @@ url={
     "externalTenants_version": "https://prd-euw-api-externaltenants.valdperformance.com/version",
     "get_profiles": "https://prd-euw-api-externalprofile.valdperformance.com/profiles",
     "get_groups": "https://prd-euw-api-externaltenants.valdperformance.com/groups",
+    "get_training_sessions": "https://prd-euw-api-extforcedecks.valdperformance.com/tests"
 }
 
 # Global token cache to persist across Streamlit reruns
@@ -190,3 +191,53 @@ class ValdHubClient:
         except Exception as e:
             logger.error(f"Error parsing group details: {e}")
             return None
+
+    def get_training_sessions(self, profile_id=None) -> Optional[Dict]:
+        "Retrieves a list of ForceDecks training sessions."
+
+
+        date="2020-01-01T00:00:00.000Z"
+
+        if profile_id is None:
+            params = {"TenantId": str(self.tenant_id),
+                      "ModifiedFromUtc": date}
+            print(f"Params: {params}")
+            try:
+                response = requests.get(
+                    url["get_training_sessions"],
+                    timeout=10,
+                    params=params,
+                    headers={"Authorization": self.get_token(self.client_id, self.client_secret)}
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data
+            except requests.RequestException as e:
+                logger.error(f"Error fetching training sessions: {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Error parsing training sessions: {e}")
+                return None
+            
+        else:
+            params = {"TenantId": str(self.tenant_id), 
+                      "ModifiedFromUtc": date, 
+                      "ProfileId": profile_id}
+            print(f"Params: {params}")
+            try:
+                response = requests.get(
+                    url["get_training_sessions"],
+                    timeout=10,
+                    params=params,
+                    headers={"Authorization": self.get_token(self.client_id, self.client_secret)}
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data
+            except requests.RequestException as e:
+                logger.error(f"Error fetching training sessions: {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Error parsing training sessions: {e}")
+                return None
+

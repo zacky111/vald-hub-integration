@@ -63,7 +63,6 @@ def main():
             if api_connected:
                 st.success("✅ Connected to Vald Hub API. ")
             else:
-                st.warning("⚠️ Using sample data (API not connected)")
                 st.info("Configure `.env` file with your Vald Hub credentials")
         except Exception as e:
             st.error(f"API Error: {str(e)}")
@@ -163,7 +162,35 @@ def main():
     # Main content based on display mode
     if display_mode == "Overview":
         try:
-            st.write("API Version: ", client.get_version())
+            st.header("Training Sessions Overview")
+
+            data = client.get_training_sessions(profile_id=athlete_id)
+            if data and "tests" in data:
+                tests_list = data["tests"]
+                if tests_list:
+                    df = pd.DataFrame(tests_list)
+                    # Select and rename columns for better display
+                    columns_to_show = [
+                        "testId", "profileId", "testType", "recordedDateUtc", 
+                        "analysedDateUtc", "weight", "notes"
+                    ]
+                    df_display = df.reindex(columns=columns_to_show, fill_value='').copy()
+                    df_display.columns = [
+                        "Test ID", "Profile ID", "Test Type", "Recorded Date", 
+                        "Analysed Date", "Weight (kg)", "Notes"
+                    ]
+                    # Format dates
+                    df_display["Recorded Date"] = pd.to_datetime(df_display["Recorded Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
+                    df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
+                    
+                    st.dataframe(df_display, use_container_width=True)
+                    
+                    st.write(f"**Total sessions:** {len(tests_list)}")
+                else:
+                    st.info("No training sessions found.")
+            else:
+                st.error("Failed to load training sessions data.")
+
         except Exception as e:
             st.error(f"Could not fetch data: {str(e)}")
     elif display_mode == "Athlete Analysis":

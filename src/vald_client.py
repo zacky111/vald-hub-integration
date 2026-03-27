@@ -163,7 +163,6 @@ class ValdHubClient:
             )
             response.raise_for_status()
             data = response.json()
-            print(data)
             return data
         except requests.RequestException as e:
             logger.error(f"Error fetching profile details: {e}")
@@ -183,7 +182,6 @@ class ValdHubClient:
             )
             response.raise_for_status()
             data = response.json()
-            print(data)
             return data
         except requests.RequestException as e:
             logger.error(f"Error fetching group details: {e}")
@@ -196,12 +194,12 @@ class ValdHubClient:
         "Retrieves a list of ForceDecks training sessions."
 
 
-        date="2020-01-01T00:00:00.000Z"
+        date="2026-01-01T00:00:00.000Z"
 
         if profile_id is None:
             params = {"TenantId": str(self.tenant_id),
                       "ModifiedFromUtc": date}
-            print(f"Params: {params}")
+            
             try:
                 response = requests.get(
                     url["get_training_sessions"],
@@ -240,4 +238,28 @@ class ValdHubClient:
             except Exception as e:
                 logger.error(f"Error parsing training sessions: {e}")
                 return None
+            
+    def get_test_details(self, teamId, testId) -> Optional[Dict]:
+        """Fetch detailed data for a specific test/training session"""
+        try:
+
+            print("teamId:", teamId)
+            print("testId:", testId)
+            response = requests.get(
+                url=f"https://prd-euw-api-extforcedecks.valdperformance.com/v2019q3/teams/{teamId}/tests/{testId}/trials", 
+                timeout=10,  
+                headers={"Authorization": self.get_token(self.client_id, self.client_secret)}
+            )
+            response.raise_for_status()
+            data = response.json()
+            print(data)
+
+            return data
+        except requests.RequestException as e:
+            logger.error(f"Error fetching test details: {e}")
+            logger.error(f"Requested URL: {response.url if 'response' in locals() else 'N/A'}")
+            return None
+        except Exception as e:
+            logger.error(f"Error parsing test details: {e}")
+            return None
 

@@ -427,7 +427,7 @@ def main():
             
         with col2:
             modified_to = st.date_input(
-                "Show sessions until date:",
+                "Show sessions until date: \n(currently not working - always till today)",
                 value=datetime.now().date(),
                 key="modified_to"
             )
@@ -435,7 +435,7 @@ def main():
         with col3:
             type_of_test = st.selectbox(
                 "Select test type:",
-                ["All", "CMJ"],
+                ["All", "CMJ"], #To be added - more types of training
                 key="test_type_selector"
             )
 
@@ -453,23 +453,35 @@ def main():
         
         if data and "tests" in data:
             tests_list = data["tests"]
+            tests_list = [t for t in tests_list if (type_of_test == "All" or t.get('testType') == type_of_test)]
             if tests_list:
                 df = pd.DataFrame(tests_list)
                 # Select and rename columns for better display
-                columns_to_show = [
-                    "testId", "profileId", "testType", "recordedDateUtc", 
-                    "analysedDateUtc", "weight", "notes"
-                ]
+                columns_to_show = ["testType", "recordedDateUtc", "analysedDateUtc", "weight", "notes"]
+
                 df_display = df.reindex(columns=columns_to_show, fill_value='').copy()
-                df_display.columns = [
-                    "Test ID", "Profile ID", "Test Type", "Recorded Date", 
-                    "Analysed Date", "Weight (kg)", "Notes"
-                ]
+                df_display.columns = ["Test Type", "Recorded Date", "Analysed Date", "Weight (kg)", "Notes"]
+   
                 # Format dates
                 df_display["Recorded Date"] = pd.to_datetime(df_display["Recorded Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
                 df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
                 
                 st.dataframe(df_display, use_container_width=True)
+
+                test_ids= df['testId'].tolist()
+                st.write(f"**Total sessions:** {len(test_ids)}")
+                st.write(test_ids)
+
+                ammount_of_tests = st.slider(
+                    "Select number of tests to compare (latest):",
+                    min_value=1,
+                    max_value=len(test_ids),
+                    value=len(test_ids) if len(test_ids) < 5 else 5,
+                    key="num_tests_selector"
+                )
+
+                chosen_test_ids = test_ids[-ammount_of_tests:]
+                st.write(f"Comparing tests with IDs: {chosen_test_ids}")
                 
 
 

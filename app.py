@@ -12,13 +12,147 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.vald_client import ValdHubClient
+# first tab visualizations
 from src.visualizations import create_metrics_comparison_chart, create_limb_asymmetry_chart
+
+# second tab visualizations
+from src.visualizations import create_mean_std_chart
 
 
 @st.cache_resource
 def get_vald_client():
     """Get cached ValdHubClient instance - persists across Streamlit reruns"""
     return ValdHubClient()
+
+
+def prepare_tests_for_comparison(tests_details_all, selected_metrics):
+    """
+    Dla każdego testu:
+    - zbiera metryki per trial
+    - wybiera top 3 próby wg Jump Height (Flight Time)
+    - liczy mean i std dla wybranych metryk
+    Zwraca:
+    - summary_df: 1 wiersz = 1 test, kolumny = metric_mean / metric_std
+    - trials_data_per_test: dict z pełnymi danymi triali do dalszego użycia
+    """
+    jump_height_metric = "Jump Height (Flight Time)"
+
+    def get_sort_date(test_obj):
+        date_source = test_obj.get("recorded_date_utc") or test_obj.get("modified_date_utc")
+        return pd.to_datetime(date_source, errors="coerce", utc=True)
+
+    # Sortowanie chronologiczne, ale etykiety będą Test 1, Test 2, ...
+    sorted_tests = sorted(
+        tests_details_all,
+        key=lambda x: (
+            pd.isna(get_sort_date(x)),
+            get_sort_date(x)
+        )
+    )
+
+    summary_rows = []
+    trials_data_per_test = {}
+
+    for test_idx, test_obj in enumerate(sorted_tests):
+        test_trials = test_obj["trials"]
+
+        recorded_date_utc = test_obj.get("recorded_date_utc")
+        modified_date_utc = test_obj.get("modified_date_utc")
+        test_id = test_obj.get("test_id")
+        test_type = test_obj.get("test_type")
+
+        date_source = recorded_date_utc or modified_date_utc
+        parsed_date = pd.to_datetime(date_source, errors="coerce", utc=True) if date_source else pd.NaT
+
+        test_label = f"Test {parsed_date}"
+
+        if not isinstance(test_trials, list) or not test_trials:
+            continue
+
+        comparison_data = {}
+
+        for i, trial in enumerate(test_trials):
+            trial_id = f"Trial {i + 1}"
+
+            if "results" not in trial:
+                continue
+
+            for r in trial["results"]:
+                metric_name = r["definition"]["name"]
+                limb = r.get("limb")
+
+                if limb == "Trial":
+                    if metric_name not in comparison_data:
+                        comparison_data[metric_name] = {}
+                    comparison_data[metric_name][trial_id] = r["value"]
+
+        if not comparison_data:
+            continue
+
+        comp_df = pd.DataFrame.from_dict(comparison_data, orient="index").transpose()
+
+        if jump_height_metric not in comp_df.columns:
+            continue
+
+        trials_df = comp_df[comp_df.index.to_series().str.startswith("Trial")].copy()
+
+        if trials_df.empty:
+            continue
+
+        trials_df[jump_height_metric] = pd.to_numeric(trials_df[jump_height_metric], errors="coerce")
+        trials_df = trials_df.dropna(subset=[jump_height_metric])
+
+        if trials_df.empty:
+            continue
+
+        top3_indices = trials_df[jump_height_metric].nlargest(3).index.tolist()
+        best3_df = trials_df.loc[top3_indices].copy()
+
+        metrics_to_use = [m for m in selected_metrics if m in best3_df.columns]
+
+        # Jump Height zawsze ma być policzone
+        if jump_height_metric in best3_df.columns:
+            metrics_to_use = [jump_height_metric] + [m for m in metrics_to_use if m != jump_height_metric]
+
+        if not metrics_to_use:
+            continue
+
+        for metric in metrics_to_use:
+            best3_df[metric] = pd.to_numeric(best3_df[metric], errors="coerce")
+
+        mean_series = best3_df[metrics_to_use].mean(numeric_only=True)
+        std_series = best3_df[metrics_to_use].std(numeric_only=True)
+
+        row = {
+            "Test": test_label,
+            "Test Order": test_idx + 1,
+            "Test ID": test_id,
+            "Test Type": test_type,
+            "Recorded Date UTC": recorded_date_utc,
+            "Modified Date UTC": modified_date_utc,
+            "Plot Date": parsed_date,
+            "Top 3 Trials": ", ".join(top3_indices),
+            "Best Jump Height": trials_df.loc[top3_indices[0], jump_height_metric] if top3_indices else None,
+        }
+
+        for metric in metrics_to_use:
+            row[f"{metric} Mean"] = mean_series.get(metric)
+            row[f"{metric} Std"] = std_series.get(metric)
+
+        summary_rows.append(row)
+
+        trials_data_per_test[test_label] = {
+            "test_id": test_id,
+            "test_type": test_type,
+            "recorded_date_utc": recorded_date_utc,
+            "modified_date_utc": modified_date_utc,
+            "all_trials_df": trials_df,
+            "best3_df": best3_df,
+            "top3_indices": top3_indices,
+        }
+
+    summary_df = pd.DataFrame(summary_rows)
+    return summary_df, trials_data_per_test
 
 
 def main():
@@ -28,7 +162,7 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded"
     )
-    
+
     # Custom CSS
     st.markdown("""
     <style>
@@ -37,67 +171,70 @@ def main():
     }
     </style>
     """, unsafe_allow_html=True)
-    
+
     # Header
     st.title("Vald Hub Performance Dashboard")
     st.markdown("*Real-time athlete performance monitoring and analysis*")
-    
+
     # Sidebar
     with st.sidebar:
 
         st.header("Configuration")
-        
+
         # Get cached client instance
         client = get_vald_client()
-        
+
         # API Status
         try:
             api_connected = client.get_token(client.client_id, client.client_secret)
-            
+
             if api_connected:
                 st.success("✅ Connected to Vald Hub API. ")
             else:
                 st.info("Configure `.env` file with your Vald Hub credentials")
         except Exception as e:
             st.error(f"API Error: {str(e)}")
-        
+
         # Refresh data
         if st.button("🔄 Refresh Data", use_container_width=True):
             if 'data' in st.session_state:
                 del st.session_state.data
             # Clear cached data
-            for key in ['profiles_data', 'groups_data', 'athlete_details', 'group_details']:
+            for key in [
+                'profiles_data', 'groups_data', 'athlete_details', 'group_details',
+                'tests_details_all', 'chosen_test_ids', 'selected_metrics',
+                'prepared_comparison_data', 'prepared_summary_data',
+                'graphs_generated'
+            ]:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
-        
+
         st.divider()
 
-
-        #obtaining data for dropdowns - cached
+        # obtaining data for dropdowns - cached
         if 'profiles_data' not in st.session_state:
             st.session_state.profiles_data = client.get_profiles()
         profiles_data = st.session_state.profiles_data
-        
+
         if 'groups_data' not in st.session_state:
             st.session_state.groups_data = client.get_groups()
         groups_data = st.session_state.groups_data
-        
+
         # Athlete Selection
         st.sidebar.markdown("## Athlete")
         try:
-            # Cache athlete data to avoid reloading on button clicks
             if 'profiles_data' not in st.session_state:
                 st.session_state.profiles_data = client.get_profiles()
             profiles_data = st.session_state.profiles_data
-            
+
             if profiles_data and 'profiles' in profiles_data:
                 athletes = profiles_data['profiles']
                 athlete_names = [
-                    f"{a.get('familyName', '')} {a.get('givenName', 'Unknown')}" 
+                    f"{a.get('familyName', '')} {a.get('givenName', 'Unknown')}"
                     for a in athletes
                 ]
-                
+
                 if athlete_names:
                     selected_athlete = st.selectbox(
                         " ",
@@ -106,8 +243,7 @@ def main():
                         label_visibility="collapsed"
                     )
                     st.session_state.selected_athlete = selected_athlete
-                    
-                    #to be deleted later on
+
                     athlete_id = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('profileId', 'N/A')
                     st.write(f"**Athlete ID:** {athlete_id}")
 
@@ -116,16 +252,16 @@ def main():
                         st.session_state.athlete_details = client.get_profiles_details(athlete_id)
                         st.session_state.current_athlete_id = athlete_id
                     athlete_details = st.session_state.athlete_details
-                    
+
                     st.write(f"**Athlete Groups - ID:** {athlete_details['groupIds']}")
-                    
+
                     # Cache group details
                     group_id = athlete_details['groupIds'][0] if athlete_details['groupIds'] else None
                     if group_id and ('group_details' not in st.session_state or st.session_state.get('current_group_id') != group_id):
                         st.session_state.group_details = client.get_group_details(group_id)
                         st.session_state.current_group_id = group_id
                     group_details = st.session_state.get('group_details')
-                    
+
                     st.write(f"**Athlete Groups - Name:** {group_details['name'] if group_details and group_details.get('name') != '' else 'N/A'}")
 
                     athlete_weight = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('weight', 'N/A')
@@ -141,21 +277,20 @@ def main():
                 st.warning("Could not load athletes")
         except Exception as e:
             st.error(f"Error loading athletes: {str(e)}")
-        
+
         st.divider()
-        
+
         # Group Selection
         st.sidebar.markdown("## Group")
         try:
-            # Cache groups data
             if 'groups_data' not in st.session_state:
                 st.session_state.groups_data = client.get_groups()
             groups_data = st.session_state.groups_data
-            
+
             if groups_data and 'groups' in groups_data:
                 groups = groups_data['groups']
                 group_names = [g.get('name', 'Unknown') for g in groups]
-                
+
                 if group_names:
                     selected_group = st.selectbox(
                         " ",
@@ -172,23 +307,19 @@ def main():
             st.error(f"Error loading groups: {str(e)}")
 
         st.divider()
-        
+
         # Settings
         st.subheader("Settings")
         display_mode = st.radio(
             "Display Mode",
             ["Overview - Single Training", "Multiple trainings comparison", "Trends"]
         )
-    
 
-    
-    
     # Main content based on display mode
     if display_mode == "Overview - Single Training":
         try:
             st.header("Training Sessions Overview")
 
-            # Date filter for training sessions
             default_from = datetime.now().date() - pd.Timedelta(days=30)
             modified_from = st.date_input(
                 "Show sessions from date:",
@@ -196,7 +327,6 @@ def main():
                 key="modified_from"
             )
 
-            # Convert to API-required UTC ISO format
             modified_from_utc = datetime.combine(modified_from, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
             st.caption(f"Current filter: date from {modified_from_utc[:10]}")
@@ -210,43 +340,40 @@ def main():
                 tests_list = data["tests"]
                 if tests_list:
                     df = pd.DataFrame(tests_list)
-                    # Select and rename columns for better display
                     columns_to_show = [
-                        "testId", "profileId", "testType", "recordedDateUtc", 
+                        "testId", "profileId", "testType", "recordedDateUtc",
                         "analysedDateUtc", "weight", "notes"
                     ]
                     df_display = df.reindex(columns=columns_to_show, fill_value='').copy()
                     df_display.columns = [
-                        "Test ID", "Profile ID", "Test Type", "Recorded Date", 
+                        "Test ID", "Profile ID", "Test Type", "Recorded Date",
                         "Analysed Date", "Weight (kg)", "Notes"
                     ]
-                    # Format dates
                     df_display["Recorded Date"] = pd.to_datetime(df_display["Recorded Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
                     df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
-                    
+
                     st.dataframe(df_display, use_container_width=True)
-                    
+
                     st.write(f"**Total sessions:** {len(tests_list)}")
-                    
-                    # Test selection for details
+
                     st.subheader("Select Test for Details")
                     test_options = [
                         f"{test.get('testType', 'Unknown')} - {pd.to_datetime(test.get('recordedDateUtc'), format='ISO8601', errors='coerce').strftime('%Y-%m-%d %H:%M') if test.get('recordedDateUtc') else 'Unknown Date'} (ID: {test.get('testId', 'N/A')})"
                         for test in tests_list
                     ]
-                    
+
                     selected_test_index = st.selectbox(
                         "Choose a test to view details:",
                         range(len(test_options)),
                         format_func=lambda x: test_options[x],
                         key="test_selector"
                     )
-                    
+
                     if st.button("Get Test Details", key="get_details"):
                         selected_test = tests_list[selected_test_index]
                         tenant_id = selected_test.get('tenantId')
                         test_id = selected_test.get('testId')
-                        
+
                         if tenant_id and test_id:
                             with st.spinner("Loading test details..."):
                                 specific_test_details = client.get_test_details(teamId=tenant_id, testId=test_id)
@@ -256,23 +383,19 @@ def main():
                                     col1.metric("Test type", selected_test.get('testType'))
                                     col2.metric("Number of trials", len(specific_test_details) if isinstance(specific_test_details, list) else 'Unknown')
                                     col3.metric("Recorded date", pd.to_datetime(selected_test.get('recordedDateUtc'), format='ISO8601', errors='coerce').strftime("%Y-%m-%d %H:%M") if selected_test.get('recordedDateUtc') else 'Unknown')
-                                    
 
-                                    # Handle the response as a list of trials
                                     if isinstance(specific_test_details, list) and specific_test_details:
-                                        # Display number of trials
                                         st.write(f"**Number of trials:** {len(specific_test_details)}")
-                                        
-                                        # Collect key metrics across all trials for comparison
+
                                         key_metrics_for_comparison = [
-                                            'Jump Height (Flight Time)', 
-                                            'Peak Power', 
-                                            'Contact Time', 
-                                            'Countermovement Depth', 
+                                            'Jump Height (Flight Time)',
+                                            'Peak Power',
+                                            'Contact Time',
+                                            'Countermovement Depth',
                                             'Peak Landing Force',
                                             'Bodyweight in Kilograms'
                                         ]
-                                        
+
                                         comparison_data = {}
                                         for i, trial in enumerate(specific_test_details):
                                             trial_id = f"Trial {i+1}"
@@ -284,14 +407,13 @@ def main():
                                                         if metric_name not in comparison_data:
                                                             comparison_data[metric_name] = {}
                                                         comparison_data[metric_name][trial_id] = r['value']
-                                        
-                                        # Display comparison table
+
                                         if comparison_data:
                                             with st.expander("Metrics Comparison Across Trials"):
                                                 st.subheader("Metrics Comparison Across Trials")
                                                 comp_df = pd.DataFrame.from_dict(comparison_data, orient='index')
-                                                comp_df = comp_df.transpose()  # Trials as rows, metrics as columns
-                                                comp_df.drop(columns='Bodyweight in Kilograms', inplace=True, errors='ignore')  # Remove bodyweight if present
+                                                comp_df = comp_df.transpose()
+                                                comp_df.drop(columns='Bodyweight in Kilograms', inplace=True, errors='ignore')
 
                                                 trials_df = comp_df[comp_df.index.to_series().str.startswith('Trial')]
 
@@ -332,8 +454,7 @@ def main():
 
                                                 styled_table = table_df.style.apply(_style_rows, axis=1)
                                                 st.dataframe(styled_table, use_container_width=True)
-                                                
-                                                # Display legend
+
                                                 st.markdown("""
                                                 **Legenda kolorów:**
                                                 - 🟩 **Ciemnozielony** - najlepsza próba (najwyższa wartość Jump Height)
@@ -342,23 +463,18 @@ def main():
                                                 - 🟦 **Jasnoniebieski** - odchylenia standardowe i współczynnik zmienności (Std, CV)
                                                 """)
 
-                                            # Visualization: Bar chart for each metric across trials
                                             with st.expander("Visualize Metrics Across Trials"):
                                                 st.subheader("Comparison Visualizations")
                                                 for metric in key_metrics_for_comparison:
                                                     fig = create_metrics_comparison_chart(trials_df, metric)
                                                     if fig:
                                                         st.plotly_chart(fig, use_container_width=True)
-                                        
-                                        # For simplicity, show detailed results from the first trial
-                                        # You can add a selector for multiple trials if needed
+
                                         trial = specific_test_details[0]
-                                        #t.subheader(f"Detailed Results from Trial 1 (ID: {trial.get('id', 'N/A')})")
-                                        
+
                                         if 'results' in trial and trial['results']:
                                             results = trial['results']
-                                            
-                                            # Create DataFrame for better display
+
                                             df_results = pd.DataFrame([
                                                 {
                                                     'Metric Name': r['definition']['name'],
@@ -370,26 +486,11 @@ def main():
                                                     'Repeat': r['repeat']
                                                 } for r in results
                                             ])
-                                            
-                                            #st.dataframe(df_results, use_container_width=True)
-                                            
-                                            # Summary stats
-                                            #st.write(f"**Total metrics:** {len(results)}")
-                                            
-                                            # Optional: Highlight key metrics
-                                            #key_metrics = ['Bodyweight', 'Countermovement Depth', 'Start of Movement']
-                                            #filtered_df = df_results[df_results['Metric Name'].str.contains('|'.join(key_metrics), case=False, na=False)]
-                                            #if not filtered_df.empty:
-                                            #    st.subheader("Key Performance Metrics")
-                                            #    st.dataframe(filtered_df, use_container_width=True)
-                                            
-                                            
-                                            # Asymmetry visualization if available
+
                                             asym_df = df_results[df_results['Limb'].isin(['Left', 'Right', 'Asym'])]
                                             if not asym_df.empty:
                                                 with st.expander("Limb Asymmetry Analysis"):
                                                     st.subheader("Limb Asymmetries")
-                                                    # Group by metric name and show left/right comparison
                                                     for metric in asym_df['Metric Name'].unique():
                                                         fig_asym = create_limb_asymmetry_chart(asym_df, metric)
                                                         if fig_asym:
@@ -402,7 +503,6 @@ def main():
                                     st.error("Failed to load test details.")
                         else:
                             st.error("Invalid test data.")
-                    
 
                 else:
                     st.info("No training sessions found.")
@@ -411,83 +511,220 @@ def main():
 
         except Exception as e:
             st.error(f"Could not fetch data: {str(e)}")
+
     elif display_mode == "Multiple trainings comparison":
 
-        # Date filter for training sessions
+        if "tests_details_all" not in st.session_state:
+            st.session_state.tests_details_all = None
+
+        if "chosen_test_ids" not in st.session_state:
+            st.session_state.chosen_test_ids = []
+
+        if "selected_metrics" not in st.session_state:
+            st.session_state.selected_metrics = []
+
+        if "prepared_comparison_data" not in st.session_state:
+            st.session_state.prepared_comparison_data = None
+
+        if "prepared_summary_data" not in st.session_state:
+            st.session_state.prepared_summary_data = None
+
+        if "graphs_generated" not in st.session_state:
+            st.session_state.graphs_generated = False
+
+        if "use_time_axis" not in st.session_state:
+            st.session_state.use_time_axis = False
+
         default_from = datetime.now().date() - pd.Timedelta(days=30)
-        
-        # Filters for searching - date from, date to, type of test
+
         col1, col2, col3 = st.columns(3)
         with col1:
             modified_from = st.date_input(
-            "Show sessions from date:",
-            value=default_from,
-            key="modified_from"
-        )
-            
+                "Show sessions from date:",
+                value=default_from,
+                key="modified_from_multi"
+            )
+
         with col2:
             modified_to = st.date_input(
                 "Show sessions until date: \n(currently not working - always till today)",
                 value=datetime.now().date(),
-                key="modified_to"
+                key="modified_to_multi"
             )
 
         with col3:
             type_of_test = st.selectbox(
                 "Select test type:",
-                ["All", "CMJ"], #To be added - more types of training
+                ["All", "CMJ"],
                 key="test_type_selector"
             )
 
-        # Convert to API-required UTC ISO format
         modified_from_utc = datetime.combine(modified_from, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         modified_to_utc = datetime.combine(modified_to, datetime.max.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         st.caption(f"Current filter: date from {modified_from_utc[:10]} to {modified_to_utc[:10]}")
-
 
         data = client.get_training_sessions_all(
             profile_id=athlete_id,
             modified_from_utc=modified_from_utc,
         )
 
-        
         if data and "tests" in data:
             tests_list = data["tests"]
             tests_list = [t for t in tests_list if (type_of_test == "All" or t.get('testType') == type_of_test)]
+
             if tests_list:
                 df = pd.DataFrame(tests_list)
-                # Select and rename columns for better display
-                columns_to_show = ["testType", "recordedDateUtc", "analysedDateUtc", "weight", "notes"]
 
+                columns_to_show = ['tenantId', "testType", "recordedDateUtc", "analysedDateUtc", "weight", "notes"]
                 df_display = df.reindex(columns=columns_to_show, fill_value='').copy()
-                df_display.columns = ["Test Type", "Recorded Date", "Analysed Date", "Weight (kg)", "Notes"]
-   
-                # Format dates
+                df_display.columns = ["Tenant ID", "Test Type", "Recorded Date", "Analysed Date", "Weight (kg)", "Notes"]
+
                 df_display["Recorded Date"] = pd.to_datetime(df_display["Recorded Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
                 df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
-                
+
                 st.dataframe(df_display, use_container_width=True)
 
-                test_ids= df['testId'].tolist()
+                test_ids = df['testId'].tolist()
                 st.write(f"**Total sessions:** {len(test_ids)}")
-                st.write(test_ids)
 
-                ammount_of_tests = st.slider(
+                amount_of_tests = st.slider(
                     "Select number of tests to compare (latest):",
                     min_value=1,
                     max_value=len(test_ids),
-                    value=len(test_ids) if len(test_ids) < 5 else 5,
+                    value=[max(1, len(test_ids)-1), len(test_ids)],
                     key="num_tests_selector"
                 )
 
-                chosen_test_ids = test_ids[-ammount_of_tests:]
-                st.write(f"Comparing tests with IDs: {chosen_test_ids}")
-                
+                chosen_test_ids = test_ids[amount_of_tests[0]-1:amount_of_tests[1]]
 
+                if st.button("Get data", key="get_data"):
+                    tests_details_all = []
+
+                    selected_tests = [t for t in tests_list if t.get("testId") in chosen_test_ids]
+
+                    st.write(f"Comparing tests with IDs: {chosen_test_ids}")
+                    progress_bar = st.progress(0, text="Loading test details...")
+
+                    for index, test_obj in enumerate(selected_tests):
+                        test_id = test_obj.get("testId")
+                        tenant_id = test_obj.get("tenantId")
+
+                        specific_test_details = client.get_test_details(
+                            teamId=tenant_id,
+                            testId=test_id
+                        )
+
+                        if specific_test_details:
+                            tests_details_all.append({
+                                "test_id": test_id,
+                                "tenant_id": tenant_id,
+                                "recorded_date_utc": test_obj.get("recordedDateUtc"),
+                                "modified_date_utc": test_obj.get("modifiedDateUtc"),
+                                "test_type": test_obj.get("testType"),
+                                "trials": specific_test_details
+                            })
+
+                            progress_bar.progress(
+                                (index + 1) / len(selected_tests),
+                                text=f"Loaded details for test number {index + 1} of {len(selected_tests)} (ID: {test_id})"
+                            )
+                        else:
+                            st.error(f"Failed to load details for test {test_id}.")
+
+                    progress_bar.empty()
+                    st.session_state.tests_details_all = tests_details_all
+                    st.session_state.chosen_test_ids = chosen_test_ids
+                    st.session_state.prepared_summary_data = None
+                    st.session_state.prepared_comparison_data = None
+                    st.session_state.graphs_generated = False
+
+                    success_loading = st.success("All test details loaded.")
+                    time.sleep(1)
+                    success_loading.empty()
+
+                if st.session_state.tests_details_all:
+                    selected_metrics = st.multiselect(
+                        "Select metrics to compare across tests:",
+                        options=[
+                            'Jump Height (Flight Time)',
+                            'Peak Power',
+                            'Contact Time',
+                            'Countermovement Depth',
+                            'Peak Landing Force',
+                            'Bodyweight in Kilograms'
+                        ],
+                        default=st.session_state.selected_metrics,
+                        key="metrics_multiselect"
+                    )
+
+                    st.session_state.selected_metrics = selected_metrics
+
+                    if st.button("Prepare data", key="prepare_data"):
+                        if not selected_metrics:
+                            st.warning("Select at least one metric before preparing data.")
+                        else:
+                            with st.spinner("Preparing comparison data..."):
+                                summary_df, trials_data_per_test = prepare_tests_for_comparison(
+                                    st.session_state.tests_details_all,
+                                    selected_metrics
+                                )
+
+                                st.session_state.prepared_summary_data = summary_df
+                                st.session_state.prepared_comparison_data = trials_data_per_test
+                                st.session_state.graphs_generated = False
+
+                            st.success("Data prepared successfully.")
+
+                    if (
+                        st.session_state.prepared_summary_data is not None
+                        and not st.session_state.prepared_summary_data.empty
+                    ):
+                        st.subheader("Prepared summary data")
+                        st.dataframe(st.session_state.prepared_summary_data, use_container_width=True)
+
+                        col_btn, col_chk = st.columns([1, 2])
+
+                        with col_btn:
+                            if st.button("Generate graphs", key="generate_graphs"):
+                                st.session_state.graphs_generated = True
+
+                        with col_chk:
+                            st.checkbox(
+                                "Use time scale on X axis",
+                                value=st.session_state.use_time_axis,
+                                key="use_time_axis"
+                            )
+
+                    if (
+                        st.session_state.graphs_generated
+                        and st.session_state.prepared_summary_data is not None
+                        and not st.session_state.prepared_summary_data.empty
+                    ):
+                        st.subheader("Graphs")
+
+                        metrics_for_graphs = list(st.session_state.selected_metrics)
+
+                        jump_height_metric = "Jump Height (Flight Time)"
+                        if jump_height_metric not in metrics_for_graphs:
+                            metrics_for_graphs = [jump_height_metric] + metrics_for_graphs
+
+                        for metric in metrics_for_graphs:
+                            fig = create_mean_std_chart(
+                                st.session_state.prepared_summary_data,
+                                metric,
+                                use_time_axis=st.session_state.use_time_axis
+                            )
+                            if fig:
+                                st.plotly_chart(fig, use_container_width=True)
+
+            else:
+                st.info("No training sessions found.")
+        else:
+            st.error("There are no training sessions or failed to load data. Try adjusting the date filter or refreshing the data.")
 
     else:
         pass
-    
+
 
 if __name__ == "__main__":
     main()

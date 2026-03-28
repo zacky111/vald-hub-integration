@@ -332,9 +332,9 @@ class ValdHubClient:
                 current_date = newest_date + pd.Timedelta(seconds=1)
 
                 time.sleep(0.2)
-                print(f"Fetching from: {current_date}, got: {len(tests)}")
+                #print(f"Fetching from: {current_date}, got: {len(tests)}")
 
-            print(f"returning: {aggregated}")
+            #print(f"returning: {aggregated}")
             return {"tests": aggregated}
 
         except Exception as e:
@@ -348,9 +348,6 @@ class ValdHubClient:
     def get_test_details(self, teamId, testId) -> Optional[Dict]:
         """Fetch detailed data for a specific test/training session"""
         try:
-
-            #print("teamId:", teamId)
-            #print("testId:", testId)
             response = requests.get(
                 url=f"https://prd-euw-api-extforcedecks.valdperformance.com/v2019q3/teams/{teamId}/tests/{testId}/trials", 
                 timeout=10,  
@@ -358,7 +355,6 @@ class ValdHubClient:
             )
             response.raise_for_status()
             data = response.json()
-            #print(data)
 
             return data
         except requests.RequestException as e:

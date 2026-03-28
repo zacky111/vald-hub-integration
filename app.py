@@ -100,7 +100,7 @@ def main():
                 
                 if athlete_names:
                     selected_athlete = st.selectbox(
-                        "",
+                        " ",
                         sorted(athlete_names),
                         key="athlete_selector",
                         label_visibility="collapsed"
@@ -132,9 +132,7 @@ def main():
                     athlete_date_of_birth = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('dateOfBirth', 'N/A')
 
                     col1, col2 = st.columns(2)
-                    #st.write(f"**Weight:** {athlete_weight} kg")
                     col1.metric("Weight (kg)", athlete_weight)
-                    #st.write(f"**Date of Birth:** {athlete_date_of_birth[:10 if athlete_date_of_birth != 'N/A' else None]}")  # Show only date part
                     col2.metric("Date of Birth", athlete_date_of_birth[:10 if athlete_date_of_birth != 'N/A' else None])
 
                 else:
@@ -160,7 +158,7 @@ def main():
                 
                 if group_names:
                     selected_group = st.selectbox(
-                        "",
+                        " ",
                         sorted(group_names),
                         key="group_selector",
                         label_visibility="collapsed"
@@ -198,32 +196,17 @@ def main():
                 key="modified_from"
             )
 
-            page_size = st.number_input(
-                "Ile rekordów na stronę?",
-                min_value=10,
-                max_value=500,
-                value=100,
-                step=10,
-                key="page_size"
-            )
 
-            fetch_all = st.checkbox(
-                "Pobierz wszystkie strony (może działać dłużej)",
-                value=True,
-                key="fetch_all"
-            )
 
             # Convert to API-required UTC ISO format
             modified_from_utc = datetime.combine(modified_from, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
-            st.caption(f"Aktualny filtr daty: od {modified_from_utc}")
+            st.caption(f"Current filter: date from {modified_from_utc[:10]}")
 
             data = client.get_training_sessions(
                 profile_id=athlete_id,
                 modified_from_utc=modified_from_utc,
-                page_size=page_size,
                 page_number=1,
-                fetch_all=fetch_all,
             )
             if data and "tests" in data:
                 tests_list = data["tests"]
@@ -270,8 +253,13 @@ def main():
                             with st.spinner("Loading test details..."):
                                 specific_test_details = client.get_test_details(teamId=tenant_id, testId=test_id)
                                 if specific_test_details:
-                                    st.subheader(f"Test Details: {selected_test.get('testType')}")
+
+                                    col1, col2, col3 = st.columns(3)
+                                    col1.metric("Test type", selected_test.get('testType'))
+                                    col2.metric("Number of trials", len(specific_test_details) if isinstance(specific_test_details, list) else 'Unknown')
+                                    col3.metric("Recorded date", pd.to_datetime(selected_test.get('recordedDateUtc'), format='ISO8601', errors='coerce').strftime("%Y-%m-%d %H:%M") if selected_test.get('recordedDateUtc') else 'Unknown')
                                     
+
                                     # Handle the response as a list of trials
                                     if isinstance(specific_test_details, list) and specific_test_details:
                                         # Display number of trials

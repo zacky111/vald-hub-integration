@@ -84,7 +84,7 @@ def main():
         groups_data = st.session_state.groups_data
         
         # Athlete Selection
-        st.subheader("Select Athlete")
+        st.sidebar.markdown("## Athlete")
         try:
             # Cache athlete data to avoid reloading on button clicks
             if 'profiles_data' not in st.session_state:
@@ -100,9 +100,10 @@ def main():
                 
                 if athlete_names:
                     selected_athlete = st.selectbox(
-                        "Choose athlete",
+                        "",
                         sorted(athlete_names),
-                        key="athlete_selector"
+                        key="athlete_selector",
+                        label_visibility="collapsed"
                     )
                     st.session_state.selected_athlete = selected_athlete
                     
@@ -146,7 +147,7 @@ def main():
         st.divider()
         
         # Group Selection
-        st.subheader("Select Group")
+        st.sidebar.markdown("## Group")
         try:
             # Cache groups data
             if 'groups_data' not in st.session_state:
@@ -159,9 +160,10 @@ def main():
                 
                 if group_names:
                     selected_group = st.selectbox(
-                        "Choose group",
+                        "",
                         sorted(group_names),
-                        key="group_selector"
+                        key="group_selector",
+                        label_visibility="collapsed"
                     )
                     st.session_state.selected_group = selected_group
                 else:
@@ -299,52 +301,68 @@ def main():
                                         
                                         # Display comparison table
                                         if comparison_data:
-                                            st.subheader("Metrics Comparison Across Trials")
-                                            comp_df = pd.DataFrame.from_dict(comparison_data, orient='index')
-                                            comp_df = comp_df.transpose()  # Trials as rows, metrics as columns
-                                            comp_df.drop(columns='Bodyweight in Kilograms', inplace=True, errors='ignore')  # Remove bodyweight if present
+                                            with st.expander("Metrics Comparison Across Trials"):
+                                                st.subheader("Metrics Comparison Across Trials")
+                                                comp_df = pd.DataFrame.from_dict(comparison_data, orient='index')
+                                                comp_df = comp_df.transpose()  # Trials as rows, metrics as columns
+                                                comp_df.drop(columns='Bodyweight in Kilograms', inplace=True, errors='ignore')  # Remove bodyweight if present
 
-                                            trials_df = comp_df[comp_df.index.to_series().str.startswith('Trial')]
+                                                trials_df = comp_df[comp_df.index.to_series().str.startswith('Trial')]
 
-                                            average_all = trials_df.mean(numeric_only=True)
-                                            std_all = trials_df.std(numeric_only=True)
-                                            cv_all = (std_all / average_all) * 100
+                                                average_all = trials_df.mean(numeric_only=True)
+                                                std_all = trials_df.std(numeric_only=True)
+                                                cv_all = (std_all / average_all) * 100
 
-                                            jump_height_col = 'Jump Height (Flight Time)'
-                                            top3_indices = []
-                                            if jump_height_col in trials_df.columns and not trials_df.empty:
-                                                top3_indices = trials_df[jump_height_col].nlargest(3).index.tolist()
+                                                jump_height_col = 'Jump Height (Flight Time)'
+                                                top3_indices = []
+                                                best_trial = None
+                                                if jump_height_col in trials_df.columns and not trials_df.empty:
+                                                    top3_values = trials_df[jump_height_col].nlargest(3)
+                                                    top3_indices = top3_values.index.tolist()
+                                                    best_trial = top3_values.index[0]
 
-                                            avg_best3 = trials_df.loc[top3_indices].mean(numeric_only=True) if top3_indices else pd.Series()
-                                            std_best3 = trials_df.loc[top3_indices].std(numeric_only=True) if top3_indices else pd.Series()
-                                            cv_best3 = (std_best3 / avg_best3) * 100 if not avg_best3.empty else pd.Series()
+                                                avg_best3 = trials_df.loc[top3_indices].mean(numeric_only=True) if top3_indices else pd.Series()
+                                                std_best3 = trials_df.loc[top3_indices].std(numeric_only=True) if top3_indices else pd.Series()
+                                                cv_best3 = (std_best3 / avg_best3) * 100 if not avg_best3.empty else pd.Series()
 
-                                            table_df = trials_df.copy()
-                                            table_df.loc['Average'] = average_all
-                                            table_df.loc['Std'] = std_all
-                                            table_df.loc['CV (%)'] = cv_all
-                                            table_df.loc['Average from Best 3'] = avg_best3
-                                            table_df.loc['Std Best 3'] = std_best3
-                                            table_df.loc['CV Best 3 (%)'] = cv_best3
+                                                table_df = trials_df.copy()
+                                                table_df.loc['Average'] = average_all
+                                                table_df.loc['Std'] = std_all
+                                                table_df.loc['CV (%)'] = cv_all
+                                                table_df.loc['Average from Best 3'] = avg_best3
+                                                table_df.loc['Std Best 3'] = std_best3
+                                                table_df.loc['CV Best 3 (%)'] = cv_best3
 
-                                            def _style_rows(row):
-                                                if row.name in top3_indices:
-                                                    return ['background-color: #90EE90; color: #000000'] * len(row)
-                                                if row.name in ['Average', 'Average from Best 3']:
-                                                    return ['background-color: #FFD700; color: #000000'] * len(row)
-                                                if row.name in ['Std', 'Std Best 3', 'CV (%)', 'CV Best 3 (%)']:
-                                                    return ['background-color: #ADD8E6; color: #000000'] * len(row)
-                                                return [''] * len(row)
+                                                def _style_rows(row):
+                                                    if row.name == best_trial:
+                                                        return ['background-color: #28A028; color: #FFFFFF'] * len(row)
+                                                    if row.name in top3_indices:
+                                                        return ['background-color: #90EE90; color: #000000'] * len(row)
+                                                    if row.name in ['Average', 'Average from Best 3']:
+                                                        return ['background-color: #FFD700; color: #000000'] * len(row)
+                                                    if row.name in ['Std', 'Std Best 3', 'CV (%)', 'CV Best 3 (%)']:
+                                                        return ['background-color: #ADD8E6; color: #000000'] * len(row)
+                                                    return [''] * len(row)
 
-                                            styled_table = table_df.style.apply(_style_rows, axis=1)
-                                            st.dataframe(styled_table, use_container_width=True)
+                                                styled_table = table_df.style.apply(_style_rows, axis=1)
+                                                st.dataframe(styled_table, use_container_width=True)
+                                                
+                                                # Display legend
+                                                st.markdown("""
+                                                **Legenda kolorów:**
+                                                - 🟩 **Ciemnozielony** - najlepsza próba (najwyższa wartość Jump Height)
+                                                - 🟩 **Jasnozielony** - top 3 próby
+                                                - 🟨 **Złoty** - średnie wartości (Average, Average from Best 3)
+                                                - 🟦 **Jasnoniebieski** - odchylenia standardowe i współczynnik zmienności (Std, CV)
+                                                """)
 
                                             # Visualization: Bar chart for each metric across trials
-                                            st.subheader("Comparison Visualizations")
-                                            for metric in key_metrics_for_comparison:
-                                                fig = create_metrics_comparison_chart(trials_df, metric)
-                                                if fig:
-                                                    st.plotly_chart(fig, use_container_width=True)
+                                            with st.expander("Visualize Metrics Across Trials"):
+                                                st.subheader("Comparison Visualizations")
+                                                for metric in key_metrics_for_comparison:
+                                                    fig = create_metrics_comparison_chart(trials_df, metric)
+                                                    if fig:
+                                                        st.plotly_chart(fig, use_container_width=True)
                                         
                                         # For simplicity, show detailed results from the first trial
                                         # You can add a selector for multiple trials if needed
@@ -379,18 +397,17 @@ def main():
                                             #    st.subheader("Key Performance Metrics")
                                             #    st.dataframe(filtered_df, use_container_width=True)
                                             
-                                            # Visualizations
-                                            st.subheader("Performance Visualizations")
                                             
                                             # Asymmetry visualization if available
                                             asym_df = df_results[df_results['Limb'].isin(['Left', 'Right', 'Asym'])]
                                             if not asym_df.empty:
-                                                st.subheader("Limb Asymmetries")
-                                                # Group by metric name and show left/right comparison
-                                                for metric in asym_df['Metric Name'].unique():
-                                                    fig_asym = create_limb_asymmetry_chart(asym_df, metric)
-                                                    if fig_asym:
-                                                        st.plotly_chart(fig_asym, use_container_width=True)
+                                                with st.expander("Limb Asymmetry Analysis"):
+                                                    st.subheader("Limb Asymmetries")
+                                                    # Group by metric name and show left/right comparison
+                                                    for metric in asym_df['Metric Name'].unique():
+                                                        fig_asym = create_limb_asymmetry_chart(asym_df, metric)
+                                                        if fig_asym:
+                                                            st.plotly_chart(fig_asym, use_container_width=True)
                                         else:
                                             st.json(trial)
                                     else:
@@ -404,7 +421,7 @@ def main():
                 else:
                     st.info("No training sessions found.")
             else:
-                st.error("Failed to load training sessions data.")
+                st.error("There are no training sessions or failed to load data. Try adjusting the date filter or refreshing the data.")
 
         except Exception as e:
             st.error(f"Could not fetch data: {str(e)}")

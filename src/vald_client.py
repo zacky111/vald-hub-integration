@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import logging
 import time
 import json
+import pandas as pd
 
 load_dotenv()
 
@@ -254,6 +255,95 @@ class ValdHubClient:
         except Exception as e:
             logger.error(f"Error parsing training sessions: {e}")
             return None
+        
+    def get_training_sessions_all(
+        self,
+        profile_id=None,
+        modified_from_utc="2026-01-01T00:00:00.000Z",
+        max_loops=10
+        ):
+    
+
+        """Fetch all sessions using time-based pagination"""
+        
+        def _fetch(date):
+            params = {
+                "TenantId": str(self.tenant_id),
+                "ModifiedFromUtc": date,
+            }
+            if profile_id:
+                params["ProfileId"] = profile_id
+
+            response = requests.get(
+                url["get_training_sessions"],
+                timeout=10,
+                params=params,
+                headers={"Authorization": self.get_token(self.client_id, self.client_secret)},
+            )
+
+            response.raise_for_status()
+
+            # DEBUG
+            print(f"Status: {response.status_code}, length: {len(response.text)}")
+
+            if not response.text.strip():
+                return {"tests": []}
+
+            try:
+                return response.json()
+            except ValueError:
+                print("⚠️ Invalid JSON response:", response.text[:200])
+                return {"tests": []}
+            
+
+        try:
+            aggregated = []
+            current_date = pd.to_datetime(modified_from_utc)
+
+            for _ in range(max_loops):
+                data = _fetch(current_date)
+
+                if not data:
+                    break
+
+                tests = data.get("tests", [])
+                if not tests:
+                    break
+
+                aggregated.extend(tests)
+
+                dates = []
+                for t in tests:
+                    date_str = t.get("modifiedDateUtc") or t.get("recordedDateUtc")
+                    if date_str:
+                        try:
+                            dates.append(pd.to_datetime(date_str, utc=True))
+                        except Exception as e:
+                            logger.warning(f"Invalid date format: {date_str} ({e})")
+
+                if not dates:
+                    break
+
+                newest_date = max(dates)
+
+                if newest_date <= current_date:
+                    break
+
+                current_date = newest_date + pd.Timedelta(seconds=1)
+
+                time.sleep(0.2)
+                print(f"Fetching from: {current_date}, got: {len(tests)}")
+
+            print(f"returning: {aggregated}")
+            return {"tests": aggregated}
+
+        except Exception as e:
+            logger.error(f"Error fetching sessions: {e}")
+            if aggregated != []:
+                logger.info(f"Returning aggregated data with {len(aggregated)} tests")
+                return {"tests": aggregated}
+            else:
+                return None
             
     def get_test_details(self, teamId, testId) -> Optional[Dict]:
         """Fetch detailed data for a specific test/training session"""

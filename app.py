@@ -445,6 +445,34 @@ def main():
         st.caption(f"Current filter: date from {modified_from_utc[:10]} to {modified_to_utc[:10]}")
 
 
+        data = client.get_training_sessions_all(
+            profile_id=athlete_id,
+            modified_from_utc=modified_from_utc,
+        )
+
+        
+        if data and "tests" in data:
+            tests_list = data["tests"]
+            if tests_list:
+                df = pd.DataFrame(tests_list)
+                # Select and rename columns for better display
+                columns_to_show = [
+                    "testId", "profileId", "testType", "recordedDateUtc", 
+                    "analysedDateUtc", "weight", "notes"
+                ]
+                df_display = df.reindex(columns=columns_to_show, fill_value='').copy()
+                df_display.columns = [
+                    "Test ID", "Profile ID", "Test Type", "Recorded Date", 
+                    "Analysed Date", "Weight (kg)", "Notes"
+                ]
+                # Format dates
+                df_display["Recorded Date"] = pd.to_datetime(df_display["Recorded Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
+                df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
+                
+                st.dataframe(df_display, use_container_width=True)
+                
+
+
     else:
         pass
     

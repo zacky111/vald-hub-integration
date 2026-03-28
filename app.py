@@ -177,14 +177,14 @@ def main():
         st.subheader("Settings")
         display_mode = st.radio(
             "Display Mode",
-            ["Overview", "Athlete Analysis", "Trends"]
+            ["Overview - Single Training", "Multiple trainings comparison", "Trends"]
         )
     
 
     
     
     # Main content based on display mode
-    if display_mode == "Overview":
+    if display_mode == "Overview - Single Training":
         try:
             st.header("Training Sessions Overview")
 
@@ -195,8 +195,6 @@ def main():
                 value=default_from,
                 key="modified_from"
             )
-
-
 
             # Convert to API-required UTC ISO format
             modified_from_utc = datetime.combine(modified_from, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -413,8 +411,40 @@ def main():
 
         except Exception as e:
             st.error(f"Could not fetch data: {str(e)}")
-    elif display_mode == "Athlete Analysis":
-        pass
+    elif display_mode == "Multiple trainings comparison":
+
+        # Date filter for training sessions
+        default_from = datetime.now().date() - pd.Timedelta(days=30)
+        
+        # Filters for searching - date from, date to, type of test
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            modified_from = st.date_input(
+            "Show sessions from date:",
+            value=default_from,
+            key="modified_from"
+        )
+            
+        with col2:
+            modified_to = st.date_input(
+                "Show sessions until date:",
+                value=datetime.now().date(),
+                key="modified_to"
+            )
+
+        with col3:
+            type_of_test = st.selectbox(
+                "Select test type:",
+                ["All", "CMJ"],
+                key="test_type_selector"
+            )
+
+        # Convert to API-required UTC ISO format
+        modified_from_utc = datetime.combine(modified_from, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        modified_to_utc = datetime.combine(modified_to, datetime.max.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        st.caption(f"Current filter: date from {modified_from_utc[:10]} to {modified_to_utc[:10]}")
+
+
     else:
         pass
     

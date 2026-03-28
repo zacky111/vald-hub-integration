@@ -7,19 +7,12 @@ from datetime import datetime
 import sys
 import os
 import time
-import plotly.express as px
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.vald_client import ValdHubClient
-from src.visualizations import (
-    create_sample_data,
-    create_force_plot,
-    create_power_velocity_plot,
-    create_metrics_comparison,
-    create_athlete_summary
-)
+from src.visualizations import create_metrics_comparison_chart, create_limb_asymmetry_chart
 
 
 @st.cache_resource
@@ -309,22 +302,49 @@ def main():
                                             st.subheader("Metrics Comparison Across Trials")
                                             comp_df = pd.DataFrame.from_dict(comparison_data, orient='index')
                                             comp_df = comp_df.transpose()  # Trials as rows, metrics as columns
-                                            comp_df.loc["Average"] = comp_df.mean(numeric_only=True)
-                                            st.dataframe(comp_df, use_container_width=True)
-                                            
+                                            comp_df.drop(columns='Bodyweight in Kilograms', inplace=True, errors='ignore')  # Remove bodyweight if present
+
+                                            trials_df = comp_df[comp_df.index.to_series().str.startswith('Trial')]
+
+                                            average_all = trials_df.mean(numeric_only=True)
+                                            std_all = trials_df.std(numeric_only=True)
+                                            cv_all = (std_all / average_all) * 100
+
+                                            jump_height_col = 'Jump Height (Flight Time)'
+                                            top3_indices = []
+                                            if jump_height_col in trials_df.columns and not trials_df.empty:
+                                                top3_indices = trials_df[jump_height_col].nlargest(3).index.tolist()
+
+                                            avg_best3 = trials_df.loc[top3_indices].mean(numeric_only=True) if top3_indices else pd.Series()
+                                            std_best3 = trials_df.loc[top3_indices].std(numeric_only=True) if top3_indices else pd.Series()
+                                            cv_best3 = (std_best3 / avg_best3) * 100 if not avg_best3.empty else pd.Series()
+
+                                            table_df = trials_df.copy()
+                                            table_df.loc['Average'] = average_all
+                                            table_df.loc['Std'] = std_all
+                                            table_df.loc['CV (%)'] = cv_all
+                                            table_df.loc['Average from Best 3'] = avg_best3
+                                            table_df.loc['Std Best 3'] = std_best3
+                                            table_df.loc['CV Best 3 (%)'] = cv_best3
+
+                                            def _style_rows(row):
+                                                if row.name in top3_indices:
+                                                    return ['background-color: #90EE90; color: #000000'] * len(row)
+                                                if row.name in ['Average', 'Average from Best 3']:
+                                                    return ['background-color: #FFD700; color: #000000'] * len(row)
+                                                if row.name in ['Std', 'Std Best 3', 'CV (%)', 'CV Best 3 (%)']:
+                                                    return ['background-color: #ADD8E6; color: #000000'] * len(row)
+                                                return [''] * len(row)
+
+                                            styled_table = table_df.style.apply(_style_rows, axis=1)
+                                            st.dataframe(styled_table, use_container_width=True)
+
                                             # Visualization: Bar chart for each metric across trials
                                             st.subheader("Comparison Visualizations")
                                             for metric in key_metrics_for_comparison:
-                                                if metric in comp_df.columns:
-                                                    metric_data = comp_df[metric].dropna()
-                                                    if len(metric_data) > 1:
-                                                        fig = px.bar(
-                                                            x=metric_data.index, 
-                                                            y=metric_data.values, 
-                                                            title=f'{metric} Across Trials',
-                                                            labels={'x': 'Trial', 'y': 'Value'}
-                                                        )
-                                                        st.plotly_chart(fig, use_container_width=True)
+                                                fig = create_metrics_comparison_chart(trials_df, metric)
+                                                if fig:
+                                                    st.plotly_chart(fig, use_container_width=True)
                                         
                                         # For simplicity, show detailed results from the first trial
                                         # You can add a selector for multiple trials if needed
@@ -368,15 +388,8 @@ def main():
                                                 st.subheader("Limb Asymmetries")
                                                 # Group by metric name and show left/right comparison
                                                 for metric in asym_df['Metric Name'].unique():
-                                                    metric_data = asym_df[asym_df['Metric Name'] == metric]
-                                                    if len(metric_data) >= 2:  # At least left and right
-                                                        fig_asym = px.bar(
-                                                            metric_data, 
-                                                            x='Limb', 
-                                                            y='Value', 
-                                                            title=f'{metric} by Limb',
-                                                            color='Limb'
-                                                        )
+                                                    fig_asym = create_limb_asymmetry_chart(asym_df, metric)
+                                                    if fig_asym:
                                                         st.plotly_chart(fig_asym, use_container_width=True)
                                         else:
                                             st.json(trial)

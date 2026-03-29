@@ -61,92 +61,215 @@ def create_limb_asymmetry_chart(asym_df, metric):
     return None
 
 
-def create_mean_std_chart(summary_df, metric_name, use_time_axis=False):
+import pandas as pd
+import plotly.graph_objects as go
+
+
+def create_mean_std_chart(summary_df, metric, use_time_axis=False):
     """
-    Tworzy wykres dla jednej metryki:
-    - punkt = mean
-    - pionowa kreska = std
-    - X = czas albo kolejność testów
+    Creates mean/std chart across tests.
+
+    Dla zwykłych metryk:
+    - linia + punkty + std
+
+    Dla asymetrii:
+    - zielone tło dla zakresu -10 do 10
+    - czerwone tło poza tym zakresem
+    - pozioma linia odniesienia y=0
     """
-    mean_col = f"{metric_name} Mean"
-    std_col = f"{metric_name} Std"
 
-    if mean_col not in summary_df.columns or std_col not in summary_df.columns:
+    mean_col = f"{metric} Mean"
+    std_col = f"{metric} Std"
+
+    if summary_df is None or summary_df.empty:
         return None
 
-    required_cols = ["Test", "Test Order", "Plot Date", mean_col, std_col]
-    if not all(col in summary_df.columns for col in required_cols):
+    if mean_col not in summary_df.columns:
         return None
 
-    plot_df = summary_df[required_cols].copy()
-    plot_df[mean_col] = pd.to_numeric(plot_df[mean_col], errors="coerce")
-    plot_df[std_col] = pd.to_numeric(plot_df[std_col], errors="coerce")
-    plot_df["Plot Date"] = pd.to_datetime(plot_df["Plot Date"], errors="coerce", utc=True)
+    df = summary_df.copy()
 
-    plot_df = plot_df.dropna(subset=[mean_col])
+    df[mean_col] = pd.to_numeric(df[mean_col], errors="coerce")
+    if std_col in df.columns:
+        df[std_col] = pd.to_numeric(df[std_col], errors="coerce")
+    else:
+        df[std_col] = None
 
-    if plot_df.empty:
+    df = df.dropna(subset=[mean_col])
+    if df.empty:
         return None
 
-    plot_df = plot_df.sort_values("Test Order")
-
-    if use_time_axis:
-        plot_df = plot_df.dropna(subset=["Plot Date"])
-        if plot_df.empty:
-            return None
-        x_values = plot_df["Plot Date"]
+    # Oś X
+    if use_time_axis and "Plot Date" in df.columns:
+        x = pd.to_datetime(df["Plot Date"], errors="coerce")
         x_title = "Date"
     else:
-        x_values = plot_df["Test"]
+        x = df["Test"]
         x_title = "Test"
 
-    customdata = []
-    for _, row in plot_df.iterrows():
-        plot_date = row["Plot Date"]
-        if pd.notna(plot_date):
-            plot_date_text = plot_date.strftime("%Y-%m-%d %H:%M")
-        else:
-            plot_date_text = "N/A"
-        customdata.append([row["Test"], plot_date_text, row[std_col]])
+    y = df[mean_col]
+    error_y = df[std_col] if std_col in df.columns else None
+
+    metric_lower = str(metric).lower()
+    is_asymmetry_metric = (
+        "asym" in metric_lower
+        or "asymmetry" in metric_lower
+    )
 
     fig = go.Figure()
 
+    # Główna seria: linia + punkty + error bars
     fig.add_trace(
         go.Scatter(
-            x=x_values,
-            y=plot_df[mean_col],
-            mode="markers+lines",
-            name=metric_name,
+            x=x,
+            y=y,
+            mode="lines+markers",
+            name=metric,
             error_y=dict(
                 type="data",
-                array=plot_df[std_col],
+                array=error_y,
                 visible=True
-            ),
-            customdata=customdata,
+            ) if error_y is not None else None,
             hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                "Date: %{customdata[1]}<br>"
-                "Mean: %{y:.2f}<br>"
-                "Std: %{customdata[2]:.2f}<extra></extra>"
-            )
+                f"<b>{metric}</b><br>"
+                + f"{x_title}: %{{x}}<br>"
+                + "Mean: %{y:.2f}<br>"
+                + (f"Std: %{{error_y.array:.2f}}<br>" if error_y is not None else "")
+                + "<extra></extra>"
+            ),
         )
     )
+
+    # Specjalne tło dla asymetrii
+    if is_asymmetry_metric:
+        fig.add_hrect(
+            y0=-10,
+            y1=10,
+            fillcolor="green",
+            opacity=0.12,
+            line_width=0,
+            layer="below"
+        )
+
+        fig.add_hrect(
+            y0=10,
+            y1=max(10, float(y.max()) + max(2, abs(float(y.max())) * 0.1)),
+            fillcolor="red",
+            opacity=0.10,
+            line_width=0,
+            layer="below"
+        )
+
+        fig.add_hrect(
+            y0=min(-10, float(y.min()) - max(2, abs(float(y.min())) * 0.1)),
+            y1=-10,
+            fillcolor="red",
+            opacity=0.10,
+            line_width=0,
+            layer="below"
+        )
+
+        fig.add_hline(
+            y=0,
+            line_width=2,
+            line_dash="dash",
+            line_color="black"
+        )
 
     fig.update_layout(
-        title=f"{metric_name} across tests",
+        title=f"{metric} across tests",
         xaxis_title=x_title,
-        yaxis_title=metric_name,
+        yaxis_title=metric,
+        hovermode="x unified",
         template="plotly_white",
-        height=450
+        height=500,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        font=dict(color="black"),
+        title_font=dict(color="black"),
+        legend=dict(font=dict(color="black"))
     )
 
-    if not use_time_axis:
-        fig.update_layout(
-            xaxis=dict(
-                type="category",
-                categoryorder="array",
-                categoryarray=plot_df["Test"].tolist()
+    fig.update_xaxes(
+        title_font=dict(color="black"),
+        tickfont=dict(color="black")
+    )
+
+    fig.update_yaxes(
+        title_font=dict(color="black"),
+        tickfont=dict(color="black")
+    )
+
+
+
+    return fig
+
+
+import plotly.graph_objects as go
+import pandas as pd
+
+
+def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=False):
+    """
+    Rysuje Left + Right na jednym wykresie
+    """
+
+    fig = go.Figure()
+
+    if use_time_axis and "Plot Date" in summary_df.columns:
+        x = pd.to_datetime(summary_df["Plot Date"], errors="coerce")
+        x_title = "Date"
+    else:
+        x = summary_df["Test"]
+        x_title = "Test"
+
+    for limb, color in [("Left", "blue"), ("Right", "red")]:
+        if limb not in metric_map:
+            continue
+
+        metric = metric_map[limb]
+
+        mean_col = f"{metric} Mean"
+        std_col = f"{metric} Std"
+
+        if mean_col not in summary_df.columns:
+            continue
+
+        y = pd.to_numeric(summary_df[mean_col], errors="coerce")
+        error = pd.to_numeric(summary_df[std_col], errors="coerce") if std_col in summary_df else None
+
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="lines+markers",
+                name=f"{base_metric} - {limb}",
+                line=dict(color=color),
+                error_y=dict(type="data", array=error, visible=True) if error is not None else None,
             )
         )
+
+    fig.update_layout(
+        title=f"{base_metric} (Left vs Right)",
+        xaxis_title=x_title,
+        yaxis_title=base_metric,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        font=dict(color="black"),
+        template="plotly_white",
+        title_font=dict(color="black"),
+        legend=dict(font=dict(color="black"))
+        )
+
+    fig.update_xaxes(
+        title_font=dict(color="black"),
+        tickfont=dict(color="black")
+    )
+
+    fig.update_yaxes(
+        title_font=dict(color="black"),
+        tickfont=dict(color="black")
+    )
+
 
     return fig

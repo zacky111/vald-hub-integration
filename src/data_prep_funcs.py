@@ -158,3 +158,21 @@ def parse_excluded_tests(excluded_text, min_idx, max_idx):
             continue
 
     return sorted(set(excluded_numbers))
+
+def group_metrics_by_base(metrics):
+    """
+    Grupuje metryki:
+    - base -> { "Left": ..., "Right": ..., "Trial": ..., "Asym": ... }
+    """
+    grouped = {}
+
+    for metric in metrics:
+        if " - " in metric:
+            base, limb = metric.rsplit(" - ", 1)
+        else:
+            base = metric
+            limb = "Trial"
+
+        grouped.setdefault(base, {})[limb] = metric
+
+    return grouped

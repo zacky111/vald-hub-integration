@@ -1,56 +1,63 @@
 TEST_TYPE_METRIC_CATEGORIES = {
     "CMJ": {
-
         "Output": [
-            "Jump Height (Flight Time)",
-            "Peak Power",
-            "Relative Peak Power",
-            "Velocity at Takeoff",
-            "Takeoff Velocity",
+            "Jump Height (Imp-Mom)",
+            "RSI-modified (Imp-Mom)",
+            "Peak Power / BM",
+            "Vertical Velocity at Takeoff",
+            "Force at Peak Power",
         ],
 
         "Monitoring": [
-            "RSI Modified",
-            "Net Impulse",
-            "Concentric Impulse",
-            "Eccentric Impulse",
+            "Bodyweight in Kilograms",
+            "Flight Time:Contraction Time",
+            "Contraction Time",
+            "Force at Peak Power",
+            "Velocity at Peak Power",
+            "Force at Zero Velocity",
+            "Concentric Impulse:Eccentric Deceleration Impulse Ratio",
         ],
 
         "Unweighting": [
-            "Unweighting Impulse",
+            "Eccentric Unloading Impulse",
             "Minimum Eccentric Force",
-            "Time to Minimum Force",
-        ],
-
-        "Eccentric": [
-            "Eccentric Duration",
-            "Eccentric Deceleration Impulse",
-            "Peak Eccentric Force",
-            "Peak Eccentric Power",
-            "Peak Eccentric Velocity",
-            "Countermovement Depth",
-            "Time to Peak Eccentric Force",
-        ],
-
-        "Concentric": [
-            "Concentric Duration",
-            "Concentric Impulse",
-            "Peak Concentric Force",
-            "Peak Concentric Power",
-            "Peak Concentric Velocity",
-            "Time to Peak Concentric Force",
         ],
 
         "Landing": [
             "Peak Landing Force",
-            "Landing Impulse",
-            "Time to Stabilization",
+        ],
+
+        "Eccentric": [
+            "Eccentric Peak Velocity",
+            "Eccentric Duration",
+            "Braking Phase Duration",
+            "Eccentric Deceleration Impulse",
+            "Eccentric Braking Impulse",
+            "Force at Zero Velocity",
+            "Minimum Eccentric Force",
+            "Eccentric Deceleration Mean Force",
+            "Eccentric Deceleration Mean Force / BW",
+            "Eccentric Braking RFD",
+            "CMJ Stiffness",
+        ],
+
+        "Concentric": [
+            "Concentric Impulse",
+            "P1 Concentric Impulse",
+            "P2 Concentric Impulse",
+            "Concentric Mean Force",
+            "Concentric Peak Force",
         ],
 
         "Asymmetry": [
-            "Force Asymmetry Index",
-            "Power Asymmetry Index",
-            "Impulse Asymmetry Index",
+            "Eccentric Unloading Impulse - Asym",
+            "Eccentric Braking Impulse - Asym",
+            "Eccentric Deceleration Impulse - Asym",
+            "Concentric Impulse - Asym",
+            "P1 Concentric Impulse - Asym",
+            "P2 Concentric Impulse - Asym",
+            "Force at Zero Velocity - Asym",
+            "Landing Impulse - Asym",
         ],
     }
 }

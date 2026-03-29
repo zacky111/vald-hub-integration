@@ -7,16 +7,18 @@ from datetime import datetime
 import sys
 import os
 import time
+import re
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.vald_client import ValdHubClient
-# first tab visualizations
-from src.visualizations import create_metrics_comparison_chart, create_limb_asymmetry_chart
 
-# second tab visualizations
+from src.visualizations import create_metrics_comparison_chart, create_limb_asymmetry_chart
 from src.visualizations import create_mean_std_chart
+
+from src.data_prep_funcs import parse_excluded_tests
+from src.metric_categories import TEST_TYPE_METRIC_CATEGORIES
 
 
 @st.cache_resource
@@ -25,15 +27,151 @@ def get_vald_client():
     return ValdHubClient()
 
 
+def normalize_metric_name(metric_name: str) -> str:
+    if metric_name is None:
+        return ""
+
+    text = str(metric_name).strip().lower()
+
+    replacements = {
+        "assymetry": "asymmetry",
+        "conctraction": "contraction",
+        "body weight": "bodyweight",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    text = re.sub(r"[^a-z0-9]+", "", text)
+    return text
+
+
+def split_metric_and_limb(metric_name: str, limb: str):
+    """
+    Zwraca:
+    - base_metric_name: nazwa bazowa metryki
+    - full_metric_name: nazwa metryki z suffixem limb, jeśli limb != Trial
+    """
+    base_metric_name = metric_name
+    full_metric_name = metric_name if not limb or limb == "Trial" else f"{metric_name} - {limb}"
+    return base_metric_name, full_metric_name
+
+
+def extract_available_metrics_from_tests(tests_details_all):
+    """
+    Zwraca listę wszystkich metryk dostępnych w pobranych testach.
+    Każdy element:
+    {
+        "base_name": ...,
+        "full_name": ...,
+        "limb": ...,
+        "normalized_base": ...,
+        "normalized_full": ...,
+    }
+    """
+    available_entries = []
+    seen = set()
+
+    for test_obj in tests_details_all or []:
+        trials = test_obj.get("trials", [])
+        for trial in trials:
+            for result in trial.get("results", []):
+                metric_name = result.get("definition", {}).get("name")
+                limb = result.get("limb")
+
+                if not metric_name:
+                    continue
+
+                base_name, full_name = split_metric_and_limb(metric_name, limb)
+                key = (base_name, full_name, limb)
+
+                if key in seen:
+                    continue
+
+                seen.add(key)
+                available_entries.append({
+                    "base_name": base_name,
+                    "full_name": full_name,
+                    "limb": limb,
+                    "normalized_base": normalize_metric_name(base_name),
+                    "normalized_full": normalize_metric_name(full_name),
+                })
+
+    return available_entries
+
+
+def resolve_category_metrics_for_test_type(test_type, available_metric_entries):
+    """
+    Dopasowuje metryki z configu kategorii do realnych metryk z API.
+    Dopasowanie odbywa się po nazwie bazowej, dzięki czemu np.:
+    'Peak Force'
+    dopasuje:
+    - Peak Force
+    - Peak Force - Left
+    - Peak Force - Right
+    - Peak Force - Asym
+
+    Zwraca:
+    - resolved: category -> lista pełnych nazw metryk z API
+    - unmatched: category -> lista metryk z configu, których nie udało się dopasować
+    """
+    category_config = TEST_TYPE_METRIC_CATEGORIES.get(test_type, {})
+    resolved = {}
+    unmatched = {}
+
+    for category, config_metrics in category_config.items():
+        resolved[category] = []
+        unmatched[category] = []
+
+        for config_metric in config_metrics:
+            normalized_config = normalize_metric_name(config_metric)
+
+            # 1. exact base match
+            matched_entries = [
+                entry["full_name"]
+                for entry in available_metric_entries
+                if entry["normalized_base"] == normalized_config
+            ]
+
+            # 2. fallback: exact full match
+            if not matched_entries:
+                matched_entries = [
+                    entry["full_name"]
+                    for entry in available_metric_entries
+                    if entry["normalized_full"] == normalized_config
+                ]
+
+            # 3. fallback: partial base/full match
+            if not matched_entries:
+                matched_entries = [
+                    entry["full_name"]
+                    for entry in available_metric_entries
+                    if normalized_config in entry["normalized_base"]
+                    or entry["normalized_base"] in normalized_config
+                    or normalized_config in entry["normalized_full"]
+                    or entry["normalized_full"] in normalized_config
+                ]
+
+            matched_entries = list(dict.fromkeys(matched_entries))
+
+            if matched_entries:
+                for metric in matched_entries:
+                    if metric not in resolved[category]:
+                        resolved[category].append(metric)
+            else:
+                unmatched[category].append(config_metric)
+
+    return resolved, unmatched
+
+
 def prepare_tests_for_comparison(tests_details_all, selected_metrics):
     """
     Dla każdego testu:
-    - zbiera metryki per trial
-    - wybiera top 3 próby wg Jump Height (Flight Time)
+    - zbiera WSZYSTKIE metryki per trial (Trial, Left, Right, Asym, itd.)
+    - wybiera top 3 próby wg Jump Height (Flight Time) [tylko Trial]
     - liczy mean i std dla wybranych metryk
     Zwraca:
-    - summary_df: 1 wiersz = 1 test, kolumny = metric_mean / metric_std
-    - trials_data_per_test: dict z pełnymi danymi triali do dalszego użycia
+    - summary_df
+    - trials_data_per_test
     """
     jump_height_metric = "Jump Height (Flight Time)"
 
@@ -41,7 +179,6 @@ def prepare_tests_for_comparison(tests_details_all, selected_metrics):
         date_source = test_obj.get("recorded_date_utc") or test_obj.get("modified_date_utc")
         return pd.to_datetime(date_source, errors="coerce", utc=True)
 
-    # Sortowanie chronologiczne, ale etykiety będą Test 1, Test 2, ...
     sorted_tests = sorted(
         tests_details_all,
         key=lambda x: (
@@ -64,7 +201,7 @@ def prepare_tests_for_comparison(tests_details_all, selected_metrics):
         date_source = recorded_date_utc or modified_date_utc
         parsed_date = pd.to_datetime(date_source, errors="coerce", utc=True) if date_source else pd.NaT
 
-        test_label = f"Test {parsed_date}"
+        test_label = f"Test {test_idx + 1}"
 
         if not isinstance(test_trials, list) or not test_trials:
             continue
@@ -78,24 +215,29 @@ def prepare_tests_for_comparison(tests_details_all, selected_metrics):
                 continue
 
             for r in trial["results"]:
-                metric_name = r["definition"]["name"]
+                metric_name = r.get("definition", {}).get("name")
                 limb = r.get("limb")
+                value = r.get("value")
 
-                if limb == "Trial":
-                    if metric_name not in comparison_data:
-                        comparison_data[metric_name] = {}
-                    comparison_data[metric_name][trial_id] = r["value"]
+                if metric_name is None:
+                    continue
+
+                _, full_metric_name = split_metric_and_limb(metric_name, limb)
+
+                if full_metric_name not in comparison_data:
+                    comparison_data[full_metric_name] = {}
+                comparison_data[full_metric_name][trial_id] = value
 
         if not comparison_data:
             continue
 
         comp_df = pd.DataFrame.from_dict(comparison_data, orient="index").transpose()
 
+        # Jump Height do top3 wybieramy wyłącznie po Trial
         if jump_height_metric not in comp_df.columns:
             continue
 
         trials_df = comp_df[comp_df.index.to_series().str.startswith("Trial")].copy()
-
         if trials_df.empty:
             continue
 
@@ -163,7 +305,6 @@ def main():
         initial_sidebar_state="expanded"
     )
 
-    # Custom CSS
     st.markdown("""
     <style>
     .main {
@@ -172,19 +313,13 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # Header
     st.title("Vald Hub Performance Dashboard")
     st.markdown("*Real-time athlete performance monitoring and analysis*")
 
-    # Sidebar
     with st.sidebar:
-
         st.header("Configuration")
-
-        # Get cached client instance
         client = get_vald_client()
 
-        # API Status
         try:
             api_connected = client.get_token(client.client_id, client.client_secret)
 
@@ -195,16 +330,16 @@ def main():
         except Exception as e:
             st.error(f"API Error: {str(e)}")
 
-        # Refresh data
         if st.button("🔄 Refresh Data", use_container_width=True):
             if 'data' in st.session_state:
                 del st.session_state.data
-            # Clear cached data
             for key in [
                 'profiles_data', 'groups_data', 'athlete_details', 'group_details',
                 'tests_details_all', 'chosen_test_ids', 'selected_metrics',
                 'prepared_comparison_data', 'prepared_summary_data',
-                'graphs_generated'
+                'graphs_generated', 'use_time_axis', 'excluded_tests_text',
+                'selected_categories', 'resolved_category_metrics',
+                'unmatched_category_metrics'
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
@@ -212,7 +347,6 @@ def main():
 
         st.divider()
 
-        # obtaining data for dropdowns - cached
         if 'profiles_data' not in st.session_state:
             st.session_state.profiles_data = client.get_profiles()
         profiles_data = st.session_state.profiles_data
@@ -221,7 +355,6 @@ def main():
             st.session_state.groups_data = client.get_groups()
         groups_data = st.session_state.groups_data
 
-        # Athlete Selection
         st.sidebar.markdown("## Athlete")
         try:
             if 'profiles_data' not in st.session_state:
@@ -247,7 +380,6 @@ def main():
                     athlete_id = profiles_data['profiles'][athlete_names.index(selected_athlete)].get('profileId', 'N/A')
                     st.write(f"**Athlete ID:** {athlete_id}")
 
-                    # Cache athlete details
                     if 'athlete_details' not in st.session_state or st.session_state.get('current_athlete_id') != athlete_id:
                         st.session_state.athlete_details = client.get_profiles_details(athlete_id)
                         st.session_state.current_athlete_id = athlete_id
@@ -255,7 +387,6 @@ def main():
 
                     st.write(f"**Athlete Groups - ID:** {athlete_details['groupIds']}")
 
-                    # Cache group details
                     group_id = athlete_details['groupIds'][0] if athlete_details['groupIds'] else None
                     if group_id and ('group_details' not in st.session_state or st.session_state.get('current_group_id') != group_id):
                         st.session_state.group_details = client.get_group_details(group_id)
@@ -280,7 +411,6 @@ def main():
 
         st.divider()
 
-        # Group Selection
         st.sidebar.markdown("## Group")
         try:
             if 'groups_data' not in st.session_state:
@@ -308,14 +438,12 @@ def main():
 
         st.divider()
 
-        # Settings
         st.subheader("Settings")
         display_mode = st.radio(
             "Display Mode",
             ["Overview - Single Training", "Multiple trainings comparison", "Trends"]
         )
 
-    # Main content based on display mode
     if display_mode == "Overview - Single Training":
         try:
             st.header("Training Sessions Overview")
@@ -523,6 +651,15 @@ def main():
         if "selected_metrics" not in st.session_state:
             st.session_state.selected_metrics = []
 
+        if "selected_categories" not in st.session_state:
+            st.session_state.selected_categories = []
+
+        if "resolved_category_metrics" not in st.session_state:
+            st.session_state.resolved_category_metrics = {}
+
+        if "unmatched_category_metrics" not in st.session_state:
+            st.session_state.unmatched_category_metrics = {}
+
         if "prepared_comparison_data" not in st.session_state:
             st.session_state.prepared_comparison_data = None
 
@@ -534,6 +671,9 @@ def main():
 
         if "use_time_axis" not in st.session_state:
             st.session_state.use_time_axis = False
+
+        if "excluded_tests_text" not in st.session_state:
+            st.session_state.excluded_tests_text = ""
 
         default_from = datetime.now().date() - pd.Timedelta(days=30)
 
@@ -559,6 +699,14 @@ def main():
                 key="test_type_selector"
             )
 
+        available_categories_for_type = list(TEST_TYPE_METRIC_CATEGORIES.get(type_of_test, {}).keys())
+
+        current_selected_categories = st.session_state.selected_categories
+        st.session_state.selected_categories = [
+            category for category in current_selected_categories
+            if category in available_categories_for_type
+        ]
+
         modified_from_utc = datetime.combine(modified_from, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         modified_to_utc = datetime.combine(modified_to, datetime.max.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         st.caption(f"Current filter: date from {modified_from_utc[:10]} to {modified_to_utc[:10]}")
@@ -577,103 +725,162 @@ def main():
 
                 columns_to_show = ['tenantId', "testType", "recordedDateUtc", "analysedDateUtc", "weight", "notes"]
                 df_display = df.reindex(columns=columns_to_show, fill_value='').copy()
-                df_display.columns = ["Tenant ID", "Test Type", "Recorded Date", "Analysed Date", "Weight (kg)", "Notes"]
+                df_display.insert(0, "Test Number", range(len(df_display)))
+                df_display.columns = ["Test Number", "Tenant ID", "Test Type", "Recorded Date", "Analysed Date", "Weight (kg)", "Notes"]
 
                 df_display["Recorded Date"] = pd.to_datetime(df_display["Recorded Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
                 df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
 
                 st.dataframe(df_display, use_container_width=True)
+                st.caption("Test Number corresponds to index in the table (starting from 0).")
 
                 test_ids = df['testId'].tolist()
                 st.write(f"**Total sessions:** {len(test_ids)}")
 
-                amount_of_tests = st.slider(
-                    "Select number of tests to compare (latest):",
-                    min_value=1,
-                    max_value=len(test_ids),
-                    value=[max(1, len(test_ids)-1), len(test_ids)],
-                    key="num_tests_selector"
-                )
+                col_range, col_exclude = st.columns([2, 1])
 
-                chosen_test_ids = test_ids[amount_of_tests[0]-1:amount_of_tests[1]]
-
-                if st.button("Get data", key="get_data"):
-                    tests_details_all = []
-
-                    selected_tests = [t for t in tests_list if t.get("testId") in chosen_test_ids]
-
-                    st.write(f"Comparing tests with IDs: {chosen_test_ids}")
-                    progress_bar = st.progress(0, text="Loading test details...")
-
-                    for index, test_obj in enumerate(selected_tests):
-                        test_id = test_obj.get("testId")
-                        tenant_id = test_obj.get("tenantId")
-
-                        specific_test_details = client.get_test_details(
-                            teamId=tenant_id,
-                            testId=test_id
-                        )
-
-                        if specific_test_details:
-                            tests_details_all.append({
-                                "test_id": test_id,
-                                "tenant_id": tenant_id,
-                                "recorded_date_utc": test_obj.get("recordedDateUtc"),
-                                "modified_date_utc": test_obj.get("modifiedDateUtc"),
-                                "test_type": test_obj.get("testType"),
-                                "trials": specific_test_details
-                            })
-
-                            progress_bar.progress(
-                                (index + 1) / len(selected_tests),
-                                text=f"Loaded details for test number {index + 1} of {len(selected_tests)} (ID: {test_id})"
-                            )
-                        else:
-                            st.error(f"Failed to load details for test {test_id}.")
-
-                    progress_bar.empty()
-                    st.session_state.tests_details_all = tests_details_all
-                    st.session_state.chosen_test_ids = chosen_test_ids
-                    st.session_state.prepared_summary_data = None
-                    st.session_state.prepared_comparison_data = None
-                    st.session_state.graphs_generated = False
-
-                    success_loading = st.success("All test details loaded.")
-                    time.sleep(1)
-                    success_loading.empty()
-
-                if st.session_state.tests_details_all:
-                    selected_metrics = st.multiselect(
-                        "Select metrics to compare across tests:",
-                        options=[
-                            'Jump Height (Flight Time)',
-                            'Peak Power',
-                            'Contact Time',
-                            'Countermovement Depth',
-                            'Peak Landing Force',
-                            'Bodyweight in Kilograms'
-                        ],
-                        default=st.session_state.selected_metrics,
-                        key="metrics_multiselect"
+                with col_range:
+                    amount_of_tests = st.slider(
+                        "Select test index range:",
+                        min_value=0,
+                        max_value=len(test_ids) - 1,
+                        value=[max(0, len(test_ids) - 2), len(test_ids) - 1],
+                        key="num_tests_selector"
                     )
 
-                    st.session_state.selected_metrics = selected_metrics
+                with col_exclude:
+                    excluded_tests_text = st.text_input(
+                        "Exclude tests (by index from table)",
+                        value=st.session_state.excluded_tests_text,
+                        key="excluded_tests_text",
+                        placeholder="e.g. 8 or 8,10"
+                    )
+
+                start_idx, end_idx = amount_of_tests
+
+                excluded_test_numbers = parse_excluded_tests(
+                    excluded_tests_text,
+                    min_idx=start_idx,
+                    max_idx=end_idx
+                )
+
+                selected_test_indices = [
+                    idx
+                    for idx in range(start_idx, end_idx + 1)
+                    if idx not in excluded_test_numbers
+                ]
+
+                chosen_test_ids = [test_ids[idx] for idx in selected_test_indices]
+
+                if excluded_test_numbers:
+                    st.caption(
+                        f"Selected test indices: {start_idx}-{end_idx} | Excluded: {excluded_test_numbers} | Final count: {len(chosen_test_ids)}"
+                    )
+                else:
+                    st.caption(
+                        f"Selected test indices: {start_idx}-{end_idx} | Final count: {len(chosen_test_ids)}"
+                    )
+
+                if st.button("Get data", key="get_data"):
+                    if not chosen_test_ids:
+                        st.warning("No tests selected after exclusions. Adjust the range or excluded test numbers.")
+                    else:
+                        tests_details_all = []
+
+                        selected_tests = [t for t in tests_list if t.get("testId") in chosen_test_ids]
+
+                        st.write(f"Comparing tests with IDs: {chosen_test_ids}")
+                        progress_bar = st.progress(0, text="Loading test details...")
+
+                        for index, test_obj in enumerate(selected_tests):
+                            test_id = test_obj.get("testId")
+                            tenant_id = test_obj.get("tenantId")
+
+                            specific_test_details = client.get_test_details(
+                                teamId=tenant_id,
+                                testId=test_id
+                            )
+
+                            if specific_test_details:
+                                tests_details_all.append({
+                                    "test_id": test_id,
+                                    "tenant_id": tenant_id,
+                                    "recorded_date_utc": test_obj.get("recordedDateUtc"),
+                                    "modified_date_utc": test_obj.get("modifiedDateUtc"),
+                                    "test_type": test_obj.get("testType"),
+                                    "trials": specific_test_details
+                                })
+
+                                progress_bar.progress(
+                                    (index + 1) / len(selected_tests),
+                                    text=f"Loaded details for test number {index + 1} of {len(selected_tests)} (ID: {test_id})"
+                                )
+                            else:
+                                st.error(f"Failed to load details for test {test_id}.")
+
+                        progress_bar.empty()
+                        st.session_state.tests_details_all = tests_details_all
+                        st.session_state.chosen_test_ids = chosen_test_ids
+                        st.session_state.prepared_summary_data = None
+                        st.session_state.prepared_comparison_data = None
+                        st.session_state.graphs_generated = False
+                        st.session_state.resolved_category_metrics = {}
+                        st.session_state.unmatched_category_metrics = {}
+                        st.session_state.selected_metrics = []
+
+                        success_loading = st.success("All test details loaded.")
+                        time.sleep(1)
+                        success_loading.empty()
+
+                if st.session_state.tests_details_all:
+                    if available_categories_for_type:
+                        selected_categories = st.multiselect(
+                            "Select metric categories:",
+                            options=available_categories_for_type,
+                            default=st.session_state.selected_categories,
+                            key="categories_multiselect"
+                        )
+                        st.session_state.selected_categories = selected_categories
+                    else:
+                        st.info(f"No metric categories configured for test type: {type_of_test}")
+                        selected_categories = []
 
                     if st.button("Prepare data", key="prepare_data"):
-                        if not selected_metrics:
-                            st.warning("Select at least one metric before preparing data.")
+                        if not selected_categories:
+                            st.warning("Select at least one category before preparing data.")
                         else:
                             with st.spinner("Preparing comparison data..."):
-                                summary_df, trials_data_per_test = prepare_tests_for_comparison(
-                                    st.session_state.tests_details_all,
-                                    selected_metrics
+                                available_metric_entries = extract_available_metrics_from_tests(st.session_state.tests_details_all)
+                                resolved_category_metrics, unmatched_category_metrics = resolve_category_metrics_for_test_type(
+                                    type_of_test,
+                                    available_metric_entries
                                 )
 
-                                st.session_state.prepared_summary_data = summary_df
-                                st.session_state.prepared_comparison_data = trials_data_per_test
-                                st.session_state.graphs_generated = False
+                                st.session_state.resolved_category_metrics = resolved_category_metrics
+                                st.session_state.unmatched_category_metrics = unmatched_category_metrics
 
-                            st.success("Data prepared successfully.")
+                                selected_metrics = []
+                                for category in selected_categories:
+                                    selected_metrics.extend(resolved_category_metrics.get(category, []))
+
+                                selected_metrics = list(dict.fromkeys(selected_metrics))
+                                st.session_state.selected_metrics = selected_metrics
+
+                                if not selected_metrics:
+                                    st.session_state.prepared_summary_data = None
+                                    st.session_state.prepared_comparison_data = None
+                                    st.warning("None of the metrics from the selected categories were found in the loaded tests.")
+                                else:
+                                    summary_df, trials_data_per_test = prepare_tests_for_comparison(
+                                        st.session_state.tests_details_all,
+                                        selected_metrics
+                                    )
+
+                                    st.session_state.prepared_summary_data = summary_df
+                                    st.session_state.prepared_comparison_data = trials_data_per_test
+                                    st.session_state.graphs_generated = False
+
+                                    st.success("Data prepared successfully.")
 
                     if (
                         st.session_state.prepared_summary_data is not None
@@ -681,6 +888,13 @@ def main():
                     ):
                         st.subheader("Prepared summary data")
                         st.dataframe(st.session_state.prepared_summary_data, use_container_width=True)
+
+                        with st.expander("Debug: matched and unmatched metrics"):
+                            st.write("Selected categories:", st.session_state.selected_categories)
+                            st.write("Matched metrics by category:", st.session_state.resolved_category_metrics)
+                            st.write("Unmatched metrics by category:", st.session_state.unmatched_category_metrics)
+                            st.write("Final selected metrics:", st.session_state.selected_metrics)
+                            st.write("Columns in prepared summary data:", list(st.session_state.prepared_summary_data.columns))
 
                         col_btn, col_chk = st.columns([1, 2])
 
@@ -700,22 +914,28 @@ def main():
                         and st.session_state.prepared_summary_data is not None
                         and not st.session_state.prepared_summary_data.empty
                     ):
-                        st.subheader("Graphs")
+                        st.subheader("Graphs by category")
 
-                        metrics_for_graphs = list(st.session_state.selected_metrics)
+                        resolved_category_metrics = st.session_state.get("resolved_category_metrics", {})
 
-                        jump_height_metric = "Jump Height (Flight Time)"
-                        if jump_height_metric not in metrics_for_graphs:
-                            metrics_for_graphs = [jump_height_metric] + metrics_for_graphs
+                        for category in st.session_state.selected_categories:
+                            category_metrics = resolved_category_metrics.get(category, [])
 
-                        for metric in metrics_for_graphs:
-                            fig = create_mean_std_chart(
-                                st.session_state.prepared_summary_data,
-                                metric,
-                                use_time_axis=st.session_state.use_time_axis
-                            )
-                            if fig:
-                                st.plotly_chart(fig, use_container_width=True)
+                            with st.expander(category, expanded=True):
+                                plotted_any = False
+
+                                for metric in category_metrics:
+                                    fig = create_mean_std_chart(
+                                        st.session_state.prepared_summary_data,
+                                        metric,
+                                        use_time_axis=st.session_state.use_time_axis
+                                    )
+                                    if fig:
+                                        st.plotly_chart(fig, use_container_width=True)
+                                        plotted_any = True
+
+                                if not plotted_any:
+                                    st.info(f"No graphs available for category: {category}")
 
             else:
                 st.info("No training sessions found.")

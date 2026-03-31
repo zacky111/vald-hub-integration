@@ -365,3 +365,22 @@ class ValdHubClient:
             logger.error(f"Error parsing test details: {e}")
             return None
 
+    def get_raw_data(self, teamId, testId, includeSampleData=False) -> Optional[Dict]:
+        """Fetch raw data for a specific test/training session"""
+        try:
+            response = requests.get(
+                url=f"https://prd-euw-api-extforcedecks.valdperformance.com/v2019q3/teams/{teamId}/tests/{testId}/recording?includeSampleData={includeSampleData}", 
+                timeout=10,  
+                headers={"Authorization": self.get_token(self.client_id, self.client_secret)}
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            return data
+        except requests.RequestException as e:
+            logger.error(f"Error fetching raw data: {e}")
+            logger.error(f"Requested URL: {response.url if 'response' in locals() else 'N/A'}")
+            return None
+        except Exception as e:
+            logger.error(f"Error parsing raw data: {e}")
+            return None

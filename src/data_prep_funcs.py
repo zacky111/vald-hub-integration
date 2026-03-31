@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 def prepare_tests_for_comparison(tests_details_all, selected_metrics):
     """
@@ -568,3 +569,325 @@ def get_all_trial_metric_names(specific_test_details):
                 metric_names.add(record["metric_name"])
 
     return sorted(metric_names)
+
+
+def parse_forcedeck_raw_data(raw_data: dict) -> pd.DataFrame:
+    """
+    Parsuje raw data z ForceDecks i zwraca DataFrame z kolumnami:
+    - time
+    - left
+    - right
+    - total
+
+    Oczekiwany format:
+    {
+        "recordingDataHeader": ["Time", "Z Left", "Z Right"],
+        "recordingData": [
+            [0, -1.15, -2.17],
+            [0.001, -1.15, 1.82],
+            ...
+        ]
+    }
+    """
+    if not raw_data:
+        raise ValueError("raw_data is empty")
+
+    headers = raw_data.get("recordingDataHeader")
+    rows = raw_data.get("recordingData")
+
+    if not headers or not rows:
+        raise ValueError("Missing recordingDataHeader or recordingData")
+
+    df = pd.DataFrame(rows, columns=headers)
+
+    # Szukanie kolumn niezależnie od wielkości liter
+    col_map = {col.strip().lower(): col for col in df.columns}
+
+    time_col = col_map.get("time")
+    left_col = col_map.get("z left")
+    right_col = col_map.get("z right")
+
+    if time_col is None:
+        raise ValueError("Column 'Time' not found in recordingDataHeader")
+    if left_col is None:
+        raise ValueError("Column 'Z Left' not found in recordingDataHeader")
+    if right_col is None:
+        raise ValueError("Column 'Z Right' not found in recordingDataHeader")
+
+    parsed_df = pd.DataFrame({
+        "time": pd.to_numeric(df[time_col], errors="coerce"),
+        "left": pd.to_numeric(df[left_col], errors="coerce"),
+        "right": pd.to_numeric(df[right_col], errors="coerce"),
+    })
+
+    parsed_df["total"] = parsed_df["left"] + parsed_df["right"]
+    parsed_df = parsed_df.dropna(subset=["time", "left", "right"]).reset_index(drop=True)
+
+    return parsed_df
+
+
+def estimate_bodyweight(total_force: pd.Series) -> float:
+    positive = total_force[total_force > 50]
+    if len(positive) == 0:
+        raise ValueError("Cannot estimate bodyweight from signal")
+
+    cutoff = positive.quantile(0.7)
+    bw_candidates = positive[positive >= cutoff]
+
+    if len(bw_candidates) == 0:
+        bw_candidates = positive
+
+    return float(bw_candidates.median())
+
+
+def detect_takeoff_events(
+    df: pd.DataFrame,
+    sampling_frequency: int = 1000,
+    min_flight_ms: int = 80,
+    force_threshold_ratio: float = 0.05,
+    min_separation_ms: int = 300,
+    min_contact_before_takeoff_ms: int = 200,
+    contact_threshold_ratio: float = 0.5
+):
+    """
+    Wykrywa take-off tylko wtedy, gdy przed fazą lotu był wyraźny kontakt z platformą.
+    """
+    total = df["total"].to_numpy()
+    bw = estimate_bodyweight(df["total"])
+
+    flight_threshold = bw * force_threshold_ratio
+    contact_threshold = bw * contact_threshold_ratio
+
+    min_flight_samples = int((min_flight_ms / 1000) * sampling_frequency)
+    min_separation_samples = int((min_separation_ms / 1000) * sampling_frequency)
+    min_contact_samples = int((min_contact_before_takeoff_ms / 1000) * sampling_frequency)
+
+    below = total < flight_threshold
+    above_contact = total > contact_threshold
+
+    takeoff_indices = []
+    i = 0
+    n = len(total)
+
+    while i < n - min_flight_samples:
+        if below[i]:
+            j = i
+            while j < n and below[j]:
+                j += 1
+
+            flight_len = j - i
+
+            if flight_len >= min_flight_samples:
+                contact_start = max(0, i - min_contact_samples)
+                had_contact_before = (
+                    above_contact[contact_start:i].sum() >= int(0.7 * (i - contact_start))
+                    if i > contact_start else False
+                )
+
+                if had_contact_before:
+                    takeoff_indices.append(i)
+                    i = j + min_separation_samples
+                    continue
+
+            i = j
+        else:
+            i += 1
+
+    return takeoff_indices, bw
+
+def find_movement_onset_before_takeoff(
+    df: pd.DataFrame,
+    takeoff_idx: int,
+    sampling_frequency: int = 1000,
+    search_back_ms: int = 1500,
+    baseline_ms: int = 300,
+    min_onset_duration_ms: int = 30,
+    std_multiplier: float = 5.0,
+    min_absolute_change_n: float = 20.0
+):
+    """
+    Szuka movement onset (punkt 1) w oknie poprzedzającym take-off.
+    Onset = pierwsze trwałe odejście od lokalnego baseline'u, ale
+    szukane tylko w obrębie konkretnej próby przed wybiciem.
+    """
+    total = df["total"].to_numpy()
+    n = len(total)
+
+    search_back_samples = int((search_back_ms / 1000) * sampling_frequency)
+    baseline_samples = int((baseline_ms / 1000) * sampling_frequency)
+    min_onset_samples = int((min_onset_duration_ms / 1000) * sampling_frequency)
+
+    search_start = max(0, takeoff_idx - search_back_samples)
+    search_end = takeoff_idx
+
+    if search_end - search_start < baseline_samples + min_onset_samples:
+        return max(0, takeoff_idx - baseline_samples)
+
+    # Szukamy onset od początku okna do take-off
+    for i in range(search_start + baseline_samples, search_end - min_onset_samples):
+        baseline = total[i - baseline_samples:i]
+        bw = float(np.mean(baseline))
+        sd = float(np.std(baseline))
+        threshold = max(std_multiplier * sd, min_absolute_change_n)
+
+        window = total[i:i + min_onset_samples]
+        deviation = np.abs(window - bw) > threshold
+
+        if deviation.all():
+            return i
+
+    # fallback: jeśli nic nie znajdziemy, zwróć trochę wcześniej niż take-off
+    return max(search_start, takeoff_idx - int(0.6 * sampling_frequency))
+
+def extract_trial_aligned_to_takeoff(
+    df: pd.DataFrame,
+    takeoff_idx: int,
+    pre_ms: int = 200,
+    post_ms: int = 2000,
+    sampling_frequency: int = 1000
+) -> pd.DataFrame:
+    """
+    Wycina fragment wokół wskazanego eventu i ustawia czas względny.
+    Nazwa zachowana dla zgodności z istniejącym kodem.
+    """
+    pre_samples = int((pre_ms / 1000) * sampling_frequency)
+    post_samples = int((post_ms / 1000) * sampling_frequency)
+
+    start_idx = max(0, takeoff_idx - pre_samples)
+    end_idx = min(len(df), takeoff_idx + post_samples)
+
+    trial_df = df.iloc[start_idx:end_idx].copy().reset_index(drop=True)
+
+    event_time = df.iloc[takeoff_idx]["time"]
+    trial_df["time_rel"] = trial_df["time"] - event_time
+
+    return trial_df
+
+def prepare_overlay_trial(
+    raw_data: dict,
+    leg: str = "Both",
+    trial_number: int = 1,
+    pre_ms: int = 200,
+    post_ms: int = 2000
+):
+    df = parse_forcedeck_raw_data(raw_data)
+    sampling_frequency = int(raw_data.get("samplingFrequency", 1000))
+
+    takeoff_indices, bw = detect_takeoff_events(
+        df,
+        sampling_frequency=sampling_frequency
+    )
+
+    if not takeoff_indices:
+        raise ValueError("No valid trials detected in this recording")
+
+    if trial_number < 1 or trial_number > len(takeoff_indices):
+        raise ValueError(f"trial_number must be between 1 and {len(takeoff_indices)}")
+
+    takeoff_idx = takeoff_indices[trial_number - 1]
+
+    onset_idx = find_movement_onset_before_takeoff(
+        df,
+        takeoff_idx=takeoff_idx,
+        sampling_frequency=sampling_frequency,
+        search_back_ms=1500,
+        baseline_ms=300,
+        min_onset_duration_ms=30,
+        std_multiplier=5.0,
+        min_absolute_change_n=20.0
+    )
+
+    trial_df = extract_trial_aligned_to_takeoff(
+        df,
+        takeoff_idx=onset_idx,
+        pre_ms=pre_ms,
+        post_ms=post_ms,
+        sampling_frequency=sampling_frequency
+    )
+
+    pre_onset = trial_df[trial_df["time_rel"] < 0]
+    post_onset = trial_df[trial_df["time_rel"] >= 0]
+
+    if pre_onset.empty:
+        raise ValueError("Detected trial has no pre-onset baseline")
+
+    if post_onset.empty:
+        raise ValueError("Detected trial has no post-onset data")
+
+    # sanity check: po onset powinien istnieć realny ruch
+    if float(post_onset["total"].max()) < bw * 0.7:
+        raise ValueError("Detected event does not look like a valid movement trial")
+
+    if leg == "Left":
+        plot_cols = ["left"]
+    elif leg == "Right":
+        plot_cols = ["right"]
+    else:
+        plot_cols = ["left", "right", "total"]
+
+    return trial_df, plot_cols, len(takeoff_indices), bw
+
+
+
+
+def detect_movement_onset_events(
+    df: pd.DataFrame,
+    sampling_frequency: int = 1000,
+    baseline_window_ms: int = 500,
+    min_onset_duration_ms: int = 30,
+    std_multiplier: float = 5.0,
+    min_absolute_change_n: float = 20.0,
+    min_separation_ms: int = 1000
+):
+    """
+    Wykrywa początki ruchu (movement onset, punkt 1) jako pierwsze trwałe
+    odejście siły całkowitej od lokalnego poziomu spoczynkowego.
+
+    Zwraca:
+    - listę indeksów onsetów
+    - medianę oszacowanego bodyweight z kolejnych baseline'ów
+    """
+    total = df["total"].to_numpy()
+    n = len(total)
+
+    baseline_samples = int((baseline_window_ms / 1000) * sampling_frequency)
+    min_onset_samples = int((min_onset_duration_ms / 1000) * sampling_frequency)
+    min_separation_samples = int((min_separation_ms / 1000) * sampling_frequency)
+
+    if n < baseline_samples + min_onset_samples:
+        raise ValueError("Signal too short to detect movement onset")
+
+    onset_indices = []
+    bw_estimates = []
+
+    i = baseline_samples
+    while i < n - min_onset_samples:
+        baseline_start = max(0, i - baseline_samples)
+        baseline_end = i
+
+        baseline = total[baseline_start:baseline_end]
+        if len(baseline) < baseline_samples // 2:
+            i += 1
+            continue
+
+        bw = float(np.mean(baseline))
+        sd = float(np.std(baseline))
+
+        threshold = max(std_multiplier * sd, min_absolute_change_n)
+
+        window = total[i:i + min_onset_samples]
+        deviation = np.abs(window - bw) > threshold
+
+        if deviation.all():
+            onset_indices.append(i)
+            bw_estimates.append(bw)
+            i += min_separation_samples
+        else:
+            i += 1
+
+    if not onset_indices:
+        raise ValueError("No movement onset events detected")
+
+    bw_final = float(np.median(bw_estimates)) if bw_estimates else estimate_bodyweight(df["total"])
+
+    return onset_indices, bw_final

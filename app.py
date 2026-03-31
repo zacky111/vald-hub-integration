@@ -9,16 +9,22 @@ import os
 import time
 import re
 
+import numpy as np
+
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.vald_client import ValdHubClient
 
-from src.visualizations import create_metrics_comparison_chart, create_limb_asymmetry_chart
-from src.visualizations import create_mean_std_chart, create_left_right_chart
+from src.visualizations import create_metrics_comparison_chart, create_limb_asymmetry_chart, create_raw_force_plot
+from src.visualizations import create_mean_std_chart, create_left_right_chart, create_overlay_trials_chart
 
-from src.data_prep_funcs import parse_excluded_tests, group_metrics_by_base, normalize_metric_name, split_metric_and_limb, extract_metric_record, extract_available_metrics_from_tests, resolve_category_metrics_for_test_type, build_comparison_df_for_test_trials, find_jump_height_column, prepare_tests_for_comparison, get_all_trial_metric_names
+from src.data_prep_funcs import parse_excluded_tests, group_metrics_by_base, normalize_metric_name, split_metric_and_limb, extract_metric_record, extract_available_metrics_from_tests, resolve_category_metrics_for_test_type, build_comparison_df_for_test_trials, find_jump_height_column, prepare_tests_for_comparison, get_all_trial_metric_names, parse_forcedeck_raw_data
+from src.data_prep_funcs import detect_movement_onset_events, prepare_overlay_trial, extract_trial_aligned_to_takeoff, find_movement_onset_before_takeoff, detect_takeoff_events, estimate_bodyweight
+
 from src.metric_categories import TEST_TYPE_METRIC_CATEGORIES
+
+import plotly.graph_objects as go
 
 
 @st.cache_resource
@@ -800,7 +806,246 @@ def main():
             st.error("There are no training sessions or failed to load data. Try adjusting the date filter or refreshing the data.")
 
     else:
-        pass
+
+        st.header("Raw data / trial overlays")
+
+        if "trial_overlays" not in st.session_state:
+            st.session_state.trial_overlays = []
+
+        if "raw_data_cache" not in st.session_state:
+            st.session_state.raw_data_cache = {}
+
+        if "current_raw_json" not in st.session_state:
+            st.session_state.current_raw_json = None
+
+        if "current_raw_test_id" not in st.session_state:
+            st.session_state.current_raw_test_id = ""
+
+        if "current_raw_tenant_id" not in st.session_state:
+            st.session_state.current_raw_tenant_id = ""
+
+        st.subheader("Load raw data")
+
+        col1, col2 = st.columns([2, 2])
+
+        raw_tenant_id=client.tenant_id or ""
+
+        with col1:
+            raw_test_id = st.text_input(
+                "Test ID",
+                value=st.session_state.current_raw_test_id,
+                key="raw_test_id_input"
+            )
+
+        with col2:
+            st.write("")
+            st.write("")
+            load_raw_btn = st.button("Load raw data", use_container_width=True)
+
+        if load_raw_btn:
+            try:
+                if not raw_tenant_id.strip() or not raw_test_id.strip():
+                    st.error("Enter both Tenant ID and Test ID.")
+                else:
+                    raw_json = client.get_raw_data(
+                        raw_tenant_id.strip(),
+                        raw_test_id.strip(),
+                        True
+                    )
+
+                    st.session_state.current_raw_json = raw_json
+                    st.session_state.current_raw_test_id = raw_test_id.strip()
+                    st.session_state.current_raw_tenant_id = raw_tenant_id.strip()
+
+                    cache_key = f"{raw_tenant_id.strip()}::{raw_test_id.strip()}"
+                    st.session_state.raw_data_cache[cache_key] = raw_json
+
+                    st.success("Raw data loaded.")
+            except Exception as e:
+                st.error(f"Failed to load raw data: {e}")
+
+        raw_json = st.session_state.current_raw_json
+
+        if raw_json:
+            try:
+                df_raw, fig_raw = create_raw_force_plot(
+                    raw_json,
+                    title=f"ForceDecks Raw Data - Test {st.session_state.current_raw_test_id}",
+                    max_points=10000
+                )
+                st.plotly_chart(fig_raw, use_container_width=True)
+
+                with st.expander("Show raw data table", expanded=False):
+                    st.dataframe(df_raw, use_container_width=True)
+
+                with st.expander("Show raw JSON", expanded=False):
+                    st.write(raw_json)
+
+            except Exception as e:
+                st.error(f"Failed to visualize raw data: {e}")
+
+        st.divider()
+        st.subheader("Trial overlays")
+
+        with st.expander("Add graph of trial", expanded=False):
+            with st.form("add_trial_overlay_form"):
+                overlay_tenant_id = st.text_input(
+                    "Tenant ID for overlay trial",
+                    value=st.session_state.current_raw_tenant_id,
+                    key="overlay_tenant_id"
+                )
+
+                overlay_test_id = st.text_input(
+                    "Test ID for overlay trial",
+                    value=st.session_state.current_raw_test_id,
+                    key="overlay_test_id"
+                )
+
+                col_a, col_b, col_c = st.columns(3)
+
+                with col_a:
+                    leg_choice = st.selectbox(
+                        "Leg",
+                        ["Both", "Left", "Right"],
+                        key="overlay_leg_choice"
+                    )
+
+                with col_b:
+                    pre_ms = st.number_input(
+                    "Time before movement onset [ms]",
+                    min_value=0,
+                    value=200,
+                    step=50,
+                    key="overlay_pre_ms"
+                )
+
+                with col_c:
+                    post_ms = st.number_input(
+                        "Time after movement onset [ms]",
+                        min_value=200,
+                        value=2000,
+                        step=50,
+                        key="overlay_post_ms"
+                    )
+
+                detect_trials_btn = st.form_submit_button("Detect trials")
+
+            detected_takeoffs = []
+            detected_trials_count = 0
+            detected_bw = None
+            overlay_raw_data = None
+
+            if detect_trials_btn:
+                try:
+                    if not overlay_tenant_id.strip() or not overlay_test_id.strip():
+                        st.error("Enter both Tenant ID and Test ID.")
+                    else:
+                        cache_key = f"{overlay_tenant_id.strip()}::{overlay_test_id.strip()}"
+
+                        if cache_key in st.session_state.raw_data_cache:
+                            overlay_raw_data = st.session_state.raw_data_cache[cache_key]
+                        else:
+                            overlay_raw_data = client.get_raw_data(
+                                overlay_tenant_id.strip(),
+                                overlay_test_id.strip(),
+                                True
+                            )
+                            st.session_state.raw_data_cache[cache_key] = overlay_raw_data
+
+                        overlay_df = parse_forcedeck_raw_data(overlay_raw_data)
+                        detected_takeoffs, detected_bw = detect_takeoff_events(
+                            overlay_df,
+                            sampling_frequency=int(overlay_raw_data.get("samplingFrequency", 1000))
+                        )
+                        detected_trials_count = len(detected_takeoffs)
+
+                        st.session_state["last_overlay_raw_data"] = overlay_raw_data
+                        st.session_state["last_overlay_test_id"] = overlay_test_id.strip()
+                        st.session_state["last_overlay_tenant_id"] = overlay_tenant_id.strip()
+                        st.session_state["last_overlay_leg_choice"] = leg_choice
+                        st.session_state["last_overlay_pre_ms"] = int(pre_ms)
+                        st.session_state["last_overlay_post_ms"] = int(post_ms)
+                        st.session_state["last_detected_trials_count"] = detected_trials_count
+
+                        if detected_trials_count > 0:
+                            st.success(
+                                f"Detected {detected_trials_count} trial(s). Estimated BW: {detected_bw:.1f} N"
+                            )
+                        else:
+                            st.warning("No trials detected.")
+                except Exception as e:
+                    st.error(f"Failed to detect trials: {e}")
+
+        if st.session_state.get("last_detected_trials_count", 0) > 0:
+            with st.form("choose_trial_to_overlay_form"):
+                trial_number = st.selectbox(
+                    "Choose trial to overlay",
+                    options=list(range(1, st.session_state["last_detected_trials_count"] + 1)),
+                    key="overlay_trial_number"
+                )
+
+                add_overlay_btn = st.form_submit_button("Add selected trial overlay")
+
+            if add_overlay_btn:
+                try:
+                    overlay_raw_data = st.session_state["last_overlay_raw_data"]
+                    overlay_test_id = st.session_state["last_overlay_test_id"]
+                    leg_choice = st.session_state["last_overlay_leg_choice"]
+                    pre_ms = st.session_state["last_overlay_pre_ms"]
+                    post_ms = st.session_state["last_overlay_post_ms"]
+
+                    trial_df, plot_cols, detected_trials, bw = prepare_overlay_trial(
+                        raw_data=overlay_raw_data,
+                        leg=leg_choice,
+                        trial_number=int(trial_number),
+                        pre_ms=int(pre_ms),
+                        post_ms=int(post_ms)
+                    )
+
+                    overlay_label = f"Test {overlay_test_id} | Trial {trial_number} | {leg_choice}"
+
+                    st.session_state.trial_overlays.append({
+                        "label": overlay_label,
+                        "df": trial_df,
+                        "plot_cols": plot_cols
+                    })
+
+                    st.success("Trial overlay added.")
+                except Exception as e:
+                    st.error(f"Failed to add overlay: {e}")
+
+        if st.session_state.trial_overlays:
+            overlay_fig = create_overlay_trials_chart(st.session_state.trial_overlays)
+            st.plotly_chart(overlay_fig, use_container_width=True)
+
+            st.markdown("**Added overlays:**")
+            for idx, overlay in enumerate(st.session_state.trial_overlays, start=1):
+                st.write(f"{idx}. {overlay['label']}")
+
+            col_remove_1, col_remove_2 = st.columns([1, 1])
+
+            with col_remove_1:
+                remove_idx = st.number_input(
+                    "Remove overlay #",
+                    min_value=1,
+                    max_value=len(st.session_state.trial_overlays),
+                    step=1,
+                    value=1,
+                    key="remove_overlay_idx"
+                )
+
+            with col_remove_2:
+                st.write("")
+                st.write("")
+                if st.button("Remove selected overlay", use_container_width=True):
+                    st.session_state.trial_overlays.pop(remove_idx - 1)
+                    st.rerun()
+
+            if st.button("Clear all overlays", use_container_width=True):
+                st.session_state.trial_overlays = []
+                st.rerun()
+        else:
+            st.info("No trial overlays added yet.")
 
 
 if __name__ == "__main__":

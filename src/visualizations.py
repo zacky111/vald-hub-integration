@@ -2,6 +2,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from src.data_prep_funcs import parse_forcedeck_raw_data
+
 
 def create_metrics_comparison_chart(comp_df, metric):
     """
@@ -263,6 +265,122 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
     fig.update_yaxes(
         title_font=dict(color="black"),
         tickfont=dict(color="black")
+    )
+
+    return fig
+
+
+
+
+
+def create_raw_force_plot(
+    raw_data: dict,
+    title: str = "Raw Force Data",
+    max_points: int | None = 10000
+):
+    """
+    Tworzy wykres raw data dla lewej nogi, prawej nogi oraz sumy.
+
+    Parametry:
+    - raw_data: payload z API
+    - title: tytuł wykresu
+    - max_points: opcjonalne ograniczenie liczby punktów dla wydajności
+                  (np. przy 127k próbkach). Jeśli None, rysuje wszystko.
+
+    Zwraca:
+    - df_plot: DataFrame użyty do wykresu
+    - fig: obiekt Plotly Figure
+    """
+    df = parse_forcedeck_raw_data(raw_data)
+
+    df_plot = df.copy()
+
+    # Downsampling dla wydajności wykresu
+    if max_points is not None and len(df_plot) > max_points:
+        step = max(1, len(df_plot) // max_points)
+        df_plot = df_plot.iloc[::step].reset_index(drop=True)
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=df_plot["time"],
+        y=df_plot["left"],
+        mode="lines",
+        name="Left"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df_plot["time"],
+        y=df_plot["right"],
+        mode="lines",
+        name="Right"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df_plot["time"],
+        y=df_plot["total"],
+        mode="lines",
+        name="Total"
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title="Time [s]",
+        yaxis_title="Force [N]",
+        hovermode="x unified",
+        template="plotly_white",
+        height=600,
+        title_font=dict(color="black"),
+        legend=dict(font=dict(color="black")),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        font=dict(color="black"),
+    )
+
+    fig.update_xaxes(
+        title_font=dict(color="black"),
+        tickfont=dict(color="black")
+    )
+
+    fig.update_yaxes(
+        title_font=dict(color="black"),
+        tickfont=dict(color="black")
+    )
+
+    return df_plot, fig
+
+def create_overlay_trials_chart(overlays: list):
+    fig = go.Figure()
+    dash_styles = ["solid", "dash", "dot", "dashdot"]
+
+    for overlay_idx, overlay in enumerate(overlays):
+        label = overlay["label"]
+        df = overlay["df"]
+        plot_cols = overlay["plot_cols"]
+
+        dash_style = dash_styles[overlay_idx % len(dash_styles)]
+
+        for col in plot_cols:
+            fig.add_trace(go.Scatter(
+                x=df["time_rel"],
+                y=df[col],
+                mode="lines",
+                name=f"{label} - {col.capitalize()}",
+                line=dict(
+                    dash=dash_style,
+                    width=2
+                )
+            ))
+
+    fig.add_vline(x=0, line_width=2, line_dash="dash")
+
+    fig.update_layout(
+        title="Overlay of Trials Aligned to Movement Onset",
+        xaxis_title="Time relative to movement onset [s]",
+        yaxis_title="Force [N]",
+        hovermode="x unified",
+        template="plotly_white",
+        height=650
     )
 
     return fig

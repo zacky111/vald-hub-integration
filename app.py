@@ -1,15 +1,10 @@
-from xmlrpc import client
-
-from plotly import data
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 import sys
 import os
 import time
-import re
 
-import numpy as np
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -23,8 +18,6 @@ from src.data_prep_funcs import parse_excluded_tests, group_metrics_by_base, nor
 from src.data_prep_funcs import detect_movement_onset_events, prepare_overlay_trial, extract_trial_aligned_to_takeoff, find_movement_onset_before_takeoff, detect_takeoff_events, estimate_bodyweight
 
 from src.metric_categories import TEST_TYPE_METRIC_CATEGORIES
-
-import plotly.graph_objects as go
 
 
 @st.cache_resource
@@ -151,38 +144,28 @@ def main():
 
         st.divider()
 
-        st.sidebar.markdown("## Group")
-        try:
-            if 'groups_data' not in st.session_state:
-                st.session_state.groups_data = client.get_groups()
-            groups_data = st.session_state.groups_data
-
-            if groups_data and 'groups' in groups_data:
-                groups = groups_data['groups']
-                group_names = [g.get('name', 'Unknown') for g in groups]
-
-                if group_names:
-                    selected_group = st.selectbox(
-                        " ",
-                        sorted(group_names),
-                        key="group_selector",
-                        label_visibility="collapsed"
-                    )
-                    st.session_state.selected_group = selected_group
-                else:
-                    st.warning("No groups found")
-            else:
-                st.warning("Could not load groups")
-        except Exception as e:
-            st.error(f"Error loading groups: {str(e)}")
-
-        st.divider()
-
-        st.subheader("Settings")
+        st.sidebar.markdown("## Settings")
         display_mode = st.radio(
             "Display Mode",
             ["Overview - Single Training", "Multiple trainings comparison", "Comparison across different trials"]
         )
+
+        st.divider()
+        st.sidebar.markdown("## Notes / ID storage")
+
+        if "sidebar_id_storage" not in st.session_state:
+            st.session_state.sidebar_id_storage = ""
+
+        st.text_area(
+            "Temporary space for test IDs / notes",
+            height=180,
+            key="sidebar_id_storage",
+            placeholder="Wklej tutaj test ID, tenant ID albo dowolne notatki pomocnicze..."
+        )
+
+        if st.button("Clear notes", use_container_width=True):
+            st.session_state.sidebar_id_storage = ""
+            st.rerun()
 
     if display_mode == "Overview - Single Training":
         try:

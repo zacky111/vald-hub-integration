@@ -68,7 +68,10 @@ def main():
                 'prepared_comparison_data', 'prepared_summary_data',
                 'graphs_generated', 'use_time_axis', 'excluded_tests_text',
                 'selected_categories', 'resolved_category_metrics',
-                'unmatched_category_metrics', 'use_all_metrics_multi'
+                'unmatched_category_metrics', 'use_all_metrics_multi',
+                'overview_selected_test', 'overview_specific_test_details',
+                'overview_current_test_id', 'overview_current_tenant_id',
+                'overview_test_recorded_date', 'overview_test_type'
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
@@ -156,6 +159,9 @@ def main():
         if "sidebar_id_storage" not in st.session_state:
             st.session_state.sidebar_id_storage = ""
 
+        def clear_sidebar_notes():
+            st.session_state.sidebar_id_storage = ""
+
         st.text_area(
             "Temporary space for test IDs / notes",
             height=180,
@@ -163,12 +169,32 @@ def main():
             placeholder="Wklej tutaj test ID, tenant ID albo dowolne notatki pomocnicze..."
         )
 
-        if st.button("Clear notes", use_container_width=True):
-            st.session_state.sidebar_id_storage = ""
-            st.rerun()
+        st.button(
+            "Clear notes",
+            use_container_width=True,
+            on_click=clear_sidebar_notes
+        )
 
     if display_mode == "Overview - Single Training":
         try:
+            if "overview_specific_test_details" not in st.session_state:
+                st.session_state.overview_specific_test_details = None
+
+            if "overview_current_test_id" not in st.session_state:
+                st.session_state.overview_current_test_id = None
+
+            if "overview_current_tenant_id" not in st.session_state:
+                st.session_state.overview_current_tenant_id = None
+
+            if "overview_test_recorded_date" not in st.session_state:
+                st.session_state.overview_test_recorded_date = None
+
+            if "overview_test_type" not in st.session_state:
+                st.session_state.overview_test_type = None
+
+            if "overview_selected_test" not in st.session_state:
+                st.session_state.overview_selected_test = None
+
             st.header("Training Sessions Overview")
 
             default_from = datetime.now().date() - pd.Timedelta(days=30)
@@ -229,19 +255,39 @@ def main():
                             with st.spinner("Loading test details..."):
                                 specific_test_details = client.get_test_details(teamId=tenant_id, testId=test_id)
 
-                                if specific_test_details:
+                            if specific_test_details:
+                                st.session_state.overview_selected_test = selected_test
+                                st.session_state.overview_specific_test_details = specific_test_details
+                                st.session_state.overview_current_test_id = test_id
+                                st.session_state.overview_current_tenant_id = tenant_id
+                                st.session_state.overview_test_recorded_date = selected_test.get('recordedDateUtc')
+                                st.session_state.overview_test_type = selected_test.get('testType')
+                        
+
+                                selected_test_from_state = st.session_state.get("overview_selected_test")
+                                specific_test_details = st.session_state.get("overview_specific_test_details")
+
+                                if selected_test_from_state and specific_test_details:
                                     col1, col2, col3 = st.columns(3)
-                                    col1.metric("Test type", selected_test.get('testType'))
-                                    col2.metric("Number of trials", len(specific_test_details) if isinstance(specific_test_details, list) else 'Unknown')
+                                    col1.metric("Test type", st.session_state.get("overview_test_type"))
+                                    col2.metric(
+                                        "Number of trials",
+                                        len(specific_test_details) if isinstance(specific_test_details, list) else 'Unknown'
+                                    )
                                     col3.metric(
                                         "Recorded date",
-                                        pd.to_datetime(selected_test.get('recordedDateUtc'), format='ISO8601', errors='coerce').strftime("%Y-%m-%d %H:%M")
-                                        if selected_test.get('recordedDateUtc') else 'Unknown'
+                                        pd.to_datetime(
+                                            st.session_state.get("overview_test_recorded_date"),
+                                            format='ISO8601',
+                                            errors='coerce'
+                                        ).strftime("%Y-%m-%d %H:%M")
+                                        if st.session_state.get("overview_test_recorded_date") else 'Unknown'
                                     )
 
                                     if isinstance(specific_test_details, list) and specific_test_details:
                                         st.write(f"**Number of trials:** {len(specific_test_details)}")
 
+                                        current_test_id = st.session_state.get("overview_current_test_id")
                                         available_trial_metrics = get_all_trial_metric_names(specific_test_details)
 
                                         default_metrics = [
@@ -262,7 +308,7 @@ def main():
                                             "Select Trial-level metrics for trial comparison:",
                                             options=available_trial_metrics,
                                             default=default_metrics,
-                                            key=f"overview_metrics_{test_id}"
+                                            key=f"overview_metrics_{current_test_id}"
                                         )
 
                                         comparison_data = {}
@@ -306,7 +352,9 @@ def main():
                                                 best_trial = None
 
                                                 if jump_height_col and jump_height_col in trials_df.columns and not trials_df.empty:
-                                                    top3_values = trials_df[jump_height_col].dropna().nlargest(min(3, len(trials_df.dropna(subset=[jump_height_col]))))
+                                                    top3_values = trials_df[jump_height_col].dropna().nlargest(
+                                                        min(3, len(trials_df.dropna(subset=[jump_height_col])))
+                                                    )
                                                     top3_indices = top3_values.index.tolist()
                                                     if not top3_values.empty:
                                                         best_trial = top3_values.index[0]
@@ -982,7 +1030,18 @@ def main():
                         post_ms=int(post_ms)
                     )
 
-                    overlay_label = f"Test {overlay_test_id} | Trial {trial_number} | {leg_choice}"
+                    recorded_utc = overlay_raw_data.get("recordedUTC")
+
+                    if recorded_utc:
+                        try:
+                            recorded_dt = pd.to_datetime(recorded_utc, errors="coerce")
+                            recorded_str = recorded_dt.strftime("%Y-%m-%d %H:%M") if pd.notnull(recorded_dt) else "Unknown date"
+                        except:
+                            recorded_str = "Unknown date"
+                    else:
+                        recorded_str = "Unknown date"
+
+                    overlay_label = f"{recorded_str} | Trial {trial_number} | {leg_choice} | ID: {overlay_test_id}"
 
                     st.session_state.trial_overlays.append({
                         "label": overlay_label,

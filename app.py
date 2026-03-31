@@ -181,7 +181,7 @@ def main():
         st.subheader("Settings")
         display_mode = st.radio(
             "Display Mode",
-            ["Overview - Single Training", "Multiple trainings comparison", "Trends"]
+            ["Overview - Single Training", "Multiple trainings comparison", "Comparison across different trials"]
         )
 
     if display_mode == "Overview - Single Training":
@@ -888,12 +888,9 @@ def main():
         st.subheader("Trial overlays")
 
         with st.expander("Add graph of trial", expanded=False):
+            overlay_tenant_id = client.tenant_id
             with st.form("add_trial_overlay_form"):
-                overlay_tenant_id = st.text_input(
-                    "Tenant ID for overlay trial",
-                    value=st.session_state.current_raw_tenant_id,
-                    key="overlay_tenant_id"
-                )
+                
 
                 overlay_test_id = st.text_input(
                     "Test ID for overlay trial",

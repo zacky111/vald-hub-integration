@@ -200,13 +200,7 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False):
         tickfont=dict(color="black")
     )
 
-
-
     return fig
-
-
-import plotly.graph_objects as go
-import pandas as pd
 
 
 def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=False):
@@ -270,6 +264,5 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
         title_font=dict(color="black"),
         tickfont=dict(color="black")
     )
-
 
     return fig

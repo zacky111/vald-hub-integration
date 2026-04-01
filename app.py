@@ -39,7 +39,20 @@ def main():
     .main {
         padding: 0rem 0rem;
     }
+
+    [data-testid="stMarkdownContainer"] hr {
+        margin-top: 0.2rem !important;
+        margin-bottom: 0.2rem !important;
+    }
+    header[data-testid="stHeader"] {
+    display: none;
+    }
+
+    h1 {
+        margin-top: 0rem !important;
+    }
     </style>
+    
     """, unsafe_allow_html=True)
 
     st.title("Vald Hub Performance Dashboard")
@@ -49,33 +62,34 @@ def main():
         st.header("Configuration")
         client = get_vald_client()
 
-        try:
-            api_connected = client.get_token(client.client_id, client.client_secret)
+        with st.expander("API Connection Status", expanded=False):
+            try:
+                api_connected = client.get_token(client.client_id, client.client_secret)
 
-            if api_connected:
-                st.success("✅ Connected to Vald Hub API. ")
-            else:
-                st.info("Configure `.env` file with your Vald Hub credentials")
-        except Exception as e:
-            st.error(f"API Error: {str(e)}")
+                if api_connected:
+                    st.success("✅ Connected to Vald Hub API. ")
+                else:
+                    st.info("Configure `.env` file with your Vald Hub credentials")
+            except Exception as e:
+                st.error(f"API Error: {str(e)}")
 
-        if st.button("🔄 Refresh Data", use_container_width=True):
-            if 'data' in st.session_state:
-                del st.session_state.data
-            for key in [
-                'profiles_data', 'groups_data', 'athlete_details', 'group_details',
-                'tests_details_all', 'chosen_test_ids', 'selected_metrics',
-                'prepared_comparison_data', 'prepared_summary_data',
-                'graphs_generated', 'use_time_axis', 'excluded_tests_text',
-                'selected_categories', 'resolved_category_metrics',
-                'unmatched_category_metrics', 'use_all_metrics_multi',
-                'overview_selected_test', 'overview_specific_test_details',
-                'overview_current_test_id', 'overview_current_tenant_id',
-                'overview_test_recorded_date', 'overview_test_type'
-            ]:
-                if key in st.session_state:
-                    del st.session_state[key]
-            st.rerun()
+            if st.button("🔄 Refresh Data", width="stretch"):
+                if 'data' in st.session_state:
+                    del st.session_state.data
+                for key in [
+                    'profiles_data', 'groups_data', 'athlete_details', 'group_details',
+                    'tests_details_all', 'chosen_test_ids', 'selected_metrics',
+                    'prepared_comparison_data', 'prepared_summary_data',
+                    'graphs_generated', 'use_time_axis', 'excluded_tests_text',
+                    'selected_categories', 'resolved_category_metrics',
+                    'unmatched_category_metrics', 'use_all_metrics_multi',
+                    'overview_selected_test', 'overview_specific_test_details',
+                    'overview_current_test_id', 'overview_current_tenant_id',
+                    'overview_test_recorded_date', 'overview_test_type'
+                ]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
 
         st.divider()
 
@@ -114,7 +128,7 @@ def main():
 
                     athlete_obj = next(a for n, a in sorted_athletes if n == selected_athlete)
                     athlete_id = athlete_obj.get('profileId', 'N/A')
-                    st.write(f"**Athlete ID:** {athlete_id}")
+                    #st.write(f"**Athlete ID:** {athlete_id}")
 
                     previous_selected_athlete_id = st.session_state.get("selected_athlete_id_for_context")
 
@@ -149,21 +163,6 @@ def main():
                                 del st.session_state[key]
 
                     st.session_state.selected_athlete_id_for_context = athlete_id
-
-                    if 'athlete_details' not in st.session_state or st.session_state.get('current_athlete_id') != athlete_id:
-                        st.session_state.athlete_details = client.get_profiles_details(athlete_id)
-                        st.session_state.current_athlete_id = athlete_id
-                    athlete_details = st.session_state.athlete_details
-
-                    st.write(f"**Athlete Groups - ID:** {athlete_details['groupIds']}")
-
-                    group_id = athlete_details['groupIds'][0] if athlete_details['groupIds'] else None
-                    if group_id and ('group_details' not in st.session_state or st.session_state.get('current_group_id') != group_id):
-                        st.session_state.group_details = client.get_group_details(group_id)
-                        st.session_state.current_group_id = group_id
-                    group_details = st.session_state.get('group_details')
-
-                    st.write(f"**Athlete Groups - Name:** {group_details['name'] if group_details and group_details.get('name') != '' else 'N/A'}")
 
                     athlete_weight = athlete_obj.get('weight', 'N/A')
                     athlete_date_of_birth = athlete_obj.get('dateOfBirth', 'N/A')
@@ -205,7 +204,7 @@ def main():
 
         st.button(
             "Clear notes",
-            use_container_width=True,
+            width="stretch",
             on_click=clear_sidebar_notes
         )
 
@@ -266,7 +265,7 @@ def main():
                     df_display["Recorded Date"] = pd.to_datetime(df_display["Recorded Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
                     df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
 
-                    st.dataframe(df_display, use_container_width=True)
+                    st.dataframe(df_display, width="stretch")
 
                     st.write(f"**Total sessions:** {len(tests_list)}")
 
@@ -430,10 +429,10 @@ def main():
                                             return ['background-color: #ADD8E6; color: #000000'] * len(row)
                                         return [''] * len(row)
 
-                                    with st.expander("Metrics Comparison Across Trials", expanded=True):
+                                    with st.expander("Metrics Comparison Across Trials", expanded=False):
                                         st.subheader("Metrics Comparison Across Trials")
                                         styled_table = table_df.style.apply(_style_rows, axis=1)
-                                        st.dataframe(styled_table, use_container_width=True)
+                                        st.dataframe(styled_table, width="stretch")
 
                                         st.markdown("""
                                         **Legenda kolorów:**
@@ -443,13 +442,13 @@ def main():
                                         - 🟦 **Jasnoniebieski** - odchylenia standardowe i CV
                                         """)
 
-                                    with st.expander("Visualize Metrics Across Trials", expanded=True):
+                                    with st.expander("Visualize Metrics Across Trials", expanded=False):
                                         st.subheader("Comparison Visualizations")
                                         for metric in selected_overview_metrics:
                                             if metric in trials_df.columns:
                                                 fig = create_metrics_comparison_chart(trials_df, metric)
                                                 if fig:
-                                                    st.plotly_chart(fig, use_container_width=True)
+                                                    st.plotly_chart(fig, width="stretch")
                                 else:
                                     st.info("No trial-level data available for the selected metrics.")
                             else:
@@ -475,16 +474,16 @@ def main():
                                 ])
 
                                 with st.expander("All metrics from first trial (debug)", expanded=False):
-                                    st.dataframe(df_results, use_container_width=True)
+                                    st.dataframe(df_results, width="stretch")
 
                                 asym_df = df_results[df_results['Limb'].isin(['Left', 'Right', 'Asym'])]
                                 if not asym_df.empty:
-                                    with st.expander("Limb Asymmetry Analysis", expanded=True):
+                                    with st.expander("Limb Asymmetry Analysis", expanded=False):
                                         st.subheader("Limb Asymmetries")
                                         for metric in asym_df['Metric Name'].dropna().unique():
                                             fig_asym = create_limb_asymmetry_chart(asym_df, metric)
                                             if fig_asym:
-                                                st.plotly_chart(fig_asym, use_container_width=True)
+                                                st.plotly_chart(fig_asym, width=True)
                         else:
                             st.json(specific_test_details)
 
@@ -598,7 +597,7 @@ def main():
                 df_display["Recorded Date"] = pd.to_datetime(df_display["Recorded Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
                 df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
 
-                st.dataframe(df_display, use_container_width=True)
+                st.dataframe(df_display, width="stretch")
                 st.caption("Test Number corresponds to index in the table (starting from 0).")
 
                 test_ids = df['testId'].tolist()
@@ -719,7 +718,7 @@ def main():
                             for e in available_metric_entries
                         ]).sort_values(by=["Metric Name", "Limb"], na_position="last")
                         st.write(f"Total unique metric entries found: {len(available_metric_entries)}")
-                        st.dataframe(available_df, use_container_width=True)
+                        st.dataframe(available_df, width="stretch")
 
                     if available_categories_for_type and not use_all_metrics_multi:
                         selected_categories = st.multiselect(
@@ -781,7 +780,7 @@ def main():
                         and not st.session_state.prepared_summary_data.empty
                     ):
                         st.subheader("Prepared summary data")
-                        st.dataframe(st.session_state.prepared_summary_data, use_container_width=True)
+                        st.dataframe(st.session_state.prepared_summary_data, width="stretch")
 
                         with st.expander("Debug: matched and unmatched metrics", expanded=False):
                             st.write("Use all metrics mode:", use_all_metrics_multi)
@@ -828,7 +827,7 @@ def main():
                                         use_time_axis=st.session_state.use_time_axis
                                     )
                                     if fig:
-                                        st.plotly_chart(fig, use_container_width=True)
+                                        st.plotly_chart(fig, width="stretch")
                         else:
                             resolved_category_metrics = st.session_state.get("resolved_category_metrics", {})
 
@@ -852,7 +851,7 @@ def main():
                                                 use_time_axis=st.session_state.use_time_axis
                                             )
                                             if fig:
-                                                st.plotly_chart(fig, use_container_width=True)
+                                                st.plotly_chart(fig, width="stretch")
                                                 plotted_any = True
 
                                             # opcjonalnie dalej pokaż Trial osobno, jeśli istnieje
@@ -863,7 +862,7 @@ def main():
                                                     use_time_axis=st.session_state.use_time_axis
                                                 )
                                                 if fig:
-                                                    st.plotly_chart(fig, use_container_width=True)
+                                                    st.plotly_chart(fig, width="stretch")
                                                     plotted_any = True
 
                                         else:
@@ -875,7 +874,7 @@ def main():
                                                     use_time_axis=st.session_state.use_time_axis
                                                 )
                                                 if fig:
-                                                    st.plotly_chart(fig, use_container_width=True)
+                                                    st.plotly_chart(fig, width="stretch")
                                                     plotted_any = True
 
                                     if not plotted_any:
@@ -921,7 +920,7 @@ def main():
         with col2:
             st.write("")
             st.write("")
-            load_raw_btn = st.button("Load raw data", use_container_width=True)
+            load_raw_btn = st.button("Load raw data", width="stretch")
 
         if load_raw_btn:
             try:
@@ -954,10 +953,10 @@ def main():
                     title=f"ForceDecks Raw Data - Test {st.session_state.current_raw_test_id}",
                     max_points=10000
                 )
-                st.plotly_chart(fig_raw, use_container_width=True)
+                st.plotly_chart(fig_raw, width="stretch")
 
                 with st.expander("Show raw data table", expanded=False):
-                    st.dataframe(df_raw, use_container_width=True)
+                    st.dataframe(df_raw, width="stretch")
 
                 with st.expander("Show raw JSON", expanded=False):
                     st.write(raw_json)
@@ -1105,7 +1104,7 @@ def main():
 
         if st.session_state.trial_overlays:
             overlay_fig = create_overlay_trials_chart(st.session_state.trial_overlays)
-            st.plotly_chart(overlay_fig, use_container_width=True)
+            st.plotly_chart(overlay_fig, width="stretch")
 
             st.markdown("**Added overlays:**")
             for idx, overlay in enumerate(st.session_state.trial_overlays, start=1):
@@ -1126,11 +1125,11 @@ def main():
             with col_remove_2:
                 st.write("")
                 st.write("")
-                if st.button("Remove selected overlay", use_container_width=True):
+                if st.button("Remove selected overlay", width="stretch"):
                     st.session_state.trial_overlays.pop(remove_idx - 1)
                     st.rerun()
 
-            if st.button("Clear all overlays", use_container_width=True):
+            if st.button("Clear all overlays", width="stretch"):
                 st.session_state.trial_overlays = []
                 st.rerun()
         else:

@@ -558,19 +558,7 @@ def main():
                 key="test_type_selector"
             )
 
-        effective_test_type = type_of_test
-        if type_of_test == "All" and tests_list:
-            detected_types = sorted(set(t.get("testType") for t in tests_list if t.get("testType")))
-            if len(detected_types) == 1 and detected_types[0] in TEST_TYPE_METRIC_CATEGORIES:
-                effective_test_type = detected_types[0]
-
-        available_categories_for_type = list(TEST_TYPE_METRIC_CATEGORIES.get(effective_test_type, {}).keys())
-
-        current_selected_categories = st.session_state.selected_categories
-        st.session_state.selected_categories = [
-            category for category in current_selected_categories
-            if category in available_categories_for_type
-        ]
+        
 
         modified_from_utc = datetime.combine(modified_from, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         modified_to_utc = datetime.combine(modified_to, datetime.max.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -584,6 +572,20 @@ def main():
         if data and "tests" in data:
             tests_list = data["tests"]
             tests_list = [t for t in tests_list if (type_of_test == "All" or t.get('testType') == type_of_test)]
+
+            effective_test_type = type_of_test
+            if type_of_test == "All" and tests_list:
+                detected_types = sorted(set(t.get("testType") for t in tests_list if t.get("testType")))
+                if len(detected_types) == 1 and detected_types[0] in TEST_TYPE_METRIC_CATEGORIES:
+                    effective_test_type = detected_types[0]
+
+            available_categories_for_type = list(TEST_TYPE_METRIC_CATEGORIES.get(effective_test_type, {}).keys())
+
+            current_selected_categories = st.session_state.selected_categories
+            st.session_state.selected_categories = [
+                category for category in current_selected_categories
+                if category in available_categories_for_type
+            ]
 
             if tests_list:
                 df = pd.DataFrame(tests_list)

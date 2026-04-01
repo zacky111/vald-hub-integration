@@ -59,5 +59,14 @@ TEST_TYPE_METRIC_CATEGORIES = {
             "Force at Zero Velocity - Asym",
             "Landing Impulse - Asym",
         ],
-    }
+    },
+    "All": {
+        "Output": [],
+        "Monitoring": [],
+        "Unweighting": [],
+        "Landing": [],
+        "Eccentric": [],
+        "Concentric": [],
+        "Asymmetry": [],
+    },
 }

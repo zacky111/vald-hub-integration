@@ -1,9 +1,9 @@
 import pandas as pd
 import numpy as np
+import re
 
 from src.metric_categories import TEST_TYPE_METRIC_CATEGORIES
 
-import re
 
 def prepare_tests_for_comparison(tests_details_all, selected_metrics):
     """

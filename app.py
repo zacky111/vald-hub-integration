@@ -199,7 +199,7 @@ def main():
             "Temporary space for test IDs / notes",
             height=180,
             key="sidebar_id_storage",
-            placeholder="Wklej tutaj test ID, tenant ID albo dowolne notatki pomocnicze..."
+            placeholder="Paste test IDs or notes here to keep them handy while exploring the data."
         )
 
         st.button(
@@ -435,11 +435,11 @@ def main():
                                         st.dataframe(styled_table, width="stretch")
 
                                         st.markdown("""
-                                        **Legenda kolorów:**
-                                        - 🟩 **Ciemnozielony** - najlepsza próba
-                                        - 🟩 **Jasnozielony** - top 3 próby
-                                        - 🟨 **Złoty** - średnie wartości
-                                        - 🟦 **Jasnoniebieski** - odchylenia standardowe i CV
+                                        **Colors legend:**
+                                        - 🟩 **Dark Green** - best trial
+                                        - 🟩 **Light Green** - top 3 trials
+                                        - 🟨 **Gold** - average values
+                                        - 🟦 **Light Blue** - standard deviations and CV
                                         """)
 
                                     with st.expander("Visualize Metrics Across Trials", expanded=False):
@@ -483,7 +483,7 @@ def main():
                                         for metric in asym_df['Metric Name'].dropna().unique():
                                             fig_asym = create_limb_asymmetry_chart(asym_df, metric)
                                             if fig_asym:
-                                                st.plotly_chart(fig_asym, width=True)
+                                                st.plotly_chart(fig_asym, width="stretch")
                         else:
                             st.json(specific_test_details)
 
@@ -834,7 +834,7 @@ def main():
                             for category in st.session_state.selected_categories:
                                 category_metrics = resolved_category_metrics.get(category, [])
 
-                                with st.expander(category, expanded=True):
+                                with st.expander(category, expanded=False):
                                     plotted_any = False
 
                                     grouped_metrics = group_metrics_by_base(category_metrics)

@@ -41,31 +41,237 @@ def create_metrics_comparison_chart(comp_df, metric):
 
 def create_limb_asymmetry_chart(asym_df, metric):
     """
-    Create a bar chart for limb asymmetry for a specific metric.
+    Create a chart for limb data:
+    - Left / Right shown as bars on primary Y axis
+    - Asym shown as horizontal bar from 0 to value on secondary Y axis (%)
+    - Asym value is displayed directly as text on the chart
 
-    Args:
-        asym_df (pd.DataFrame): DataFrame with limb data
-        metric (str): The metric name to plot
-
-    Returns:
-        plotly.graph_objects.Figure: The bar chart figure
+    This avoids mixing absolute values (e.g. N) with percentages on one axis
+    and makes the asymmetry sign/direction much easier to read.
     """
-    metric_data = asym_df[asym_df['Metric Name'] == metric]
-    if len(metric_data) >= 2:
-        fig = px.bar(
-            metric_data,
-            x='Limb',
-            y='Value',
-            title=f'{metric} by Limb',
-            color='Limb'
+    metric_data = asym_df[asym_df['Metric Name'] == metric].copy()
+
+    if metric_data.empty:
+        return None
+
+    metric_data['Value'] = pd.to_numeric(metric_data['Value'], errors='coerce')
+    metric_data = metric_data.dropna(subset=['Value'])
+
+    if metric_data.empty:
+        return None
+
+    left_right = metric_data[metric_data['Limb'].isin(['Left', 'Right'])].copy()
+    asym_only = metric_data[metric_data['Limb'] == 'Asym'].copy()
+
+    if left_right.empty and asym_only.empty:
+        return None
+
+    fig = go.Figure()
+
+    # Left / Right -> primary axis
+    if not left_right.empty:
+        fig.add_trace(
+            go.Bar(
+                x=left_right['Limb'],
+                y=left_right['Value'],
+                name='Left / Right',
+                yaxis='y',
+                hovertemplate="<b>%{x}</b><br>Value: %{y:.2f}<extra></extra>"
+            )
         )
-        return fig
-    return None
+
+    # Asymmetry -> secondary axis
+    if not asym_only.empty:
+        asym_value = float(asym_only['Value'].iloc[0])
+
+        # helper category only for asymmetry trace
+        asym_x = ["Asymmetry"]
+
+        fig.add_trace(
+            go.Bar(
+                x=asym_x,
+                y=[asym_value],
+                name='Asymmetry (%)',
+                yaxis='y2',
+                text=[f"{asym_value:.2f}%"],
+                textposition='outside',
+                hovertemplate="<b>Asymmetry</b><br>Value: %{y:.2f}%<extra></extra>"
+            )
+        )
+
+        # zero line for asymmetry axis
+        fig.add_hline(
+            y=0,
+            line_dash="dash",
+            line_color="black",
+            opacity=0.8,
+            yref="y2"
+        )
+
+        # symmetric range around zero for better readability
+        asym_abs_max = max(abs(asym_value), 10)
+        asym_margin = max(2, asym_abs_max * 0.25)
+        asym_range = [-asym_abs_max - asym_margin, asym_abs_max + asym_margin]
+    else:
+        asym_range = None
+
+    fig.update_layout(
+        title=f'{metric} by Limb',
+        template='plotly_white',
+        height=550,
+        barmode='group',
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        font=dict(color='black'),
+        title_font=dict(color='black'),
+        legend=dict(font=dict(color='black')),
+
+        xaxis=dict(
+            title='',
+            title_font=dict(color='black'),
+            tickfont=dict(color='black')
+        ),
+
+        yaxis=dict(
+            title='Value',
+            title_font=dict(color='black'),
+            tickfont=dict(color='black')
+        ),
+
+        yaxis2=dict(
+            title='Asymmetry (%)',
+            title_font=dict(color='black'),
+            tickfont=dict(color='black'),
+            overlaying='y',
+            side='right',
+            showgrid=False,
+            range=asym_range,
+            zeroline=True,
+            zerolinewidth=2,
+            zerolinecolor='black'
+        )
+    )
+
+    return fig
 
 
-import pandas as pd
-import plotly.graph_objects as go
+def create_limb_asymmetry_charts(asym_df, metric):
+    """
+    Returns two separate charts:
+    1. Left / Right absolute values
+    2. Asymmetry (%) shown separately around zero
 
+    This is much clearer than mixing absolute values and percentages
+    on one figure with dual axes.
+    """
+    metric_data = asym_df[asym_df['Metric Name'] == metric].copy()
+
+    if metric_data.empty:
+        return None, None
+
+    metric_data['Value'] = pd.to_numeric(metric_data['Value'], errors='coerce')
+    metric_data = metric_data.dropna(subset=['Value'])
+
+    if metric_data.empty:
+        return None, None
+
+    left_right = metric_data[metric_data['Limb'].isin(['Left', 'Right'])].copy()
+    asym_only = metric_data[metric_data['Limb'] == 'Asym'].copy()
+
+    fig_lr = None
+    fig_asym = None
+
+    # LEFT / RIGHT CHART
+    if not left_right.empty:
+        fig_lr = go.Figure()
+
+        fig_lr.add_trace(
+            go.Bar(
+                x=left_right['Limb'],
+                y=left_right['Value'],
+                name='Left / Right',
+                text=[f"{v:.2f}" for v in left_right['Value']],
+                textposition='outside',
+                hovertemplate="<b>%{x}</b><br>Value: %{y:.2f}<extra></extra>"
+            )
+        )
+
+        fig_lr.update_layout(
+            title=f"{metric} - Left vs Right",
+            template="plotly_white",
+            height=500,
+            showlegend=False,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            font=dict(color="black"),
+            title_font=dict(color="black"),
+            xaxis=dict(
+                title="",
+                title_font=dict(color="black"),
+                tickfont=dict(color="black")
+            ),
+            yaxis=dict(
+                title="Value",
+                title_font=dict(color="black"),
+                tickfont=dict(color="black")
+            )
+        )
+
+    # ASYMMETRY CHART
+    if not asym_only.empty:
+        asym_value = float(asym_only['Value'].iloc[0])
+
+        # symetryczny zakres wokół zera
+        asym_abs_max = max(abs(asym_value), 10)
+        asym_margin = max(2, asym_abs_max * 0.25)
+        y_range = [-asym_abs_max - asym_margin, asym_abs_max + asym_margin]
+
+        fig_asym = go.Figure()
+
+        fig_asym.add_trace(
+            go.Bar(
+                x=["Asymmetry"],
+                y=[asym_value],
+                text=[f"{asym_value:.2f}%"],
+                marker_color="red" if asym_value > 0 else "darkblue",
+                textposition='outside',
+                hovertemplate="<b>Asymmetry</b><br>Value: %{y:.2f}%<extra></extra>"
+            )
+        )
+
+        fig_asym.add_hline(
+            y=0,
+            line_width=2,
+            line_dash="dash",
+            line_color="black"
+        )
+
+        fig_asym.update_layout(
+            title=f"{metric} - Asymmetry",
+            template="plotly_white",
+            height=500,
+            showlegend=False,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            font=dict(color="black"),
+            title_font=dict(color="black"),
+            xaxis=dict(
+                title="",
+                title_font=dict(color="black"),
+                tickfont=dict(color="black")
+            ),
+            yaxis=dict(
+                title="Asymmetry (%)",
+                title_font=dict(color="black"),
+                tickfont=dict(color="black"),
+                range=y_range,
+                zeroline=True,
+                zerolinewidth=2,
+                zerolinecolor="black"
+            )
+        )
+
+    return fig_lr, fig_asym
 
 def create_mean_std_chart(summary_df, metric, use_time_axis=False):
     """

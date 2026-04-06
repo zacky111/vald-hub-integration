@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.vald_client import ValdHubClient
 
-from src.visualizations import create_metrics_comparison_chart, create_limb_asymmetry_chart, create_raw_force_plot
+from src.visualizations import create_metrics_comparison_chart, create_limb_asymmetry_charts, create_raw_force_plot
 from src.visualizations import create_mean_std_chart, create_left_right_chart, create_overlay_trials_chart
 
 from src.data_prep_funcs import parse_excluded_tests, group_metrics_by_base, normalize_metric_name, split_metric_and_limb, extract_metric_record, extract_available_metrics_from_tests, resolve_category_metrics_for_test_type, build_comparison_df_for_test_trials, find_jump_height_column, prepare_tests_for_comparison, get_all_trial_metric_names, parse_forcedeck_raw_data
@@ -481,9 +481,18 @@ def main():
                                     with st.expander("Limb Asymmetry Analysis", expanded=False):
                                         st.subheader("Limb Asymmetries")
                                         for metric in asym_df['Metric Name'].dropna().unique():
-                                            fig_asym = create_limb_asymmetry_chart(asym_df, metric)
-                                            if fig_asym:
-                                                st.plotly_chart(fig_asym, width="stretch")
+                                            fig_lr, fig_asym = create_limb_asymmetry_charts(asym_df, metric)
+
+                                            if fig_lr or fig_asym:
+                                                col1, col2 = st.columns(2)
+
+                                                with col1:
+                                                    if fig_lr:
+                                                        st.plotly_chart(fig_lr, width="stretch")
+
+                                                with col2:
+                                                    if fig_asym:
+                                                        st.plotly_chart(fig_asym, width="stretch")
                         else:
                             st.json(specific_test_details)
 

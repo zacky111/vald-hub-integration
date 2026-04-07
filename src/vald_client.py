@@ -34,7 +34,7 @@ class ValdHubClient:
         self.client_id = os.getenv('CLIENT_ID')
         self.client_secret = os.getenv('CLIENT_SECRET')
         self.tenant_id = os.getenv('TENANT_ID')
-        
+
         if not self.client_id or not self.client_secret or not self.tenant_id:
             logger.warning("One or more required environment variables are not set")
 
@@ -92,27 +92,6 @@ class ValdHubClient:
             logger.error("Error retrieving token: %s", str(e))
             raise
 
-    def get_version(self):
-        try:
-            response = requests.get(url["externalTenants_version"], timeout=10)
-            response.raise_for_status()
-
-            text = response.text
-            #print("Status:", response.status_code)
-            #print("Headers:", response.headers)
-            #print("Body:", text)
-
-            try:
-                data = response.json()
-                print("JSON:", data)
-                return data
-            except ValueError:
-                # Jeśli serwer nie zwróci JSON, zwracamy tekst
-                return text
-
-        except requests.RequestException as e:
-            print("Error retrieving version:", str(e))
-            return None
 
     def get_profiles(self) -> Optional[Dict]:
         """Fetch athlete profiles from Vald Hub"""
@@ -282,10 +261,6 @@ class ValdHubClient:
             )
 
             response.raise_for_status()
-
-            # DEBUG
-            print(f"Status: {response.status_code}, length: {len(response.text)}")
-
             if not response.text.strip():
                 return {"tests": []}
 

@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -32,7 +33,12 @@ def create_metrics_comparison_chart(comp_df, metric):
         fig.update_traces(mode='lines+markers')
 
         avg_value = metric_data.mean()
-        fig.add_hline(y=avg_value, line_dash="dash", line_color="red", annotation_text=f"Average: {avg_value:.2f}")
+        fig.add_hline(
+            y=avg_value,
+            line_dash="dash",
+            line_color="red",
+            annotation_text=f"Average: {avg_value:.2f}"
+        )
 
         return fig
 
@@ -68,7 +74,6 @@ def create_limb_asymmetry_chart(asym_df, metric):
 
     fig = go.Figure()
 
-    # Left / Right -> primary axis
     if not left_right.empty:
         fig.add_trace(
             go.Bar(
@@ -80,11 +85,8 @@ def create_limb_asymmetry_chart(asym_df, metric):
             )
         )
 
-    # Asymmetry -> secondary axis
     if not asym_only.empty:
         asym_value = float(asym_only['Value'].iloc[0])
-
-        # helper category only for asymmetry trace
         asym_x = ["Asymmetry"]
 
         fig.add_trace(
@@ -99,7 +101,6 @@ def create_limb_asymmetry_chart(asym_df, metric):
             )
         )
 
-        # zero line for asymmetry axis
         fig.add_hline(
             y=0,
             line_dash="dash",
@@ -108,7 +109,6 @@ def create_limb_asymmetry_chart(asym_df, metric):
             yref="y2"
         )
 
-        # symmetric range around zero for better readability
         asym_abs_max = max(abs(asym_value), 10)
         asym_margin = max(2, asym_abs_max * 0.25)
         asym_range = [-asym_abs_max - asym_margin, asym_abs_max + asym_margin]
@@ -125,19 +125,16 @@ def create_limb_asymmetry_chart(asym_df, metric):
         font=dict(color='black'),
         title_font=dict(color='black'),
         legend=dict(font=dict(color='black')),
-
         xaxis=dict(
             title='',
             title_font=dict(color='black'),
             tickfont=dict(color='black')
         ),
-
         yaxis=dict(
             title='Value',
             title_font=dict(color='black'),
             tickfont=dict(color='black')
         ),
-
         yaxis2=dict(
             title='Asymmetry (%)',
             title_font=dict(color='black'),
@@ -181,7 +178,6 @@ def create_limb_asymmetry_charts(asym_df, metric):
     fig_lr = None
     fig_asym = None
 
-    # LEFT / RIGHT CHART
     if not left_right.empty:
         fig_lr = go.Figure()
 
@@ -217,11 +213,9 @@ def create_limb_asymmetry_charts(asym_df, metric):
             )
         )
 
-    # ASYMMETRY CHART
     if not asym_only.empty:
         asym_value = float(asym_only['Value'].iloc[0])
 
-        # symetryczny zakres wokół zera
         asym_abs_max = max(abs(asym_value), 10)
         asym_margin = max(2, asym_abs_max * 0.25)
         y_range = [-asym_abs_max - asym_margin, asym_abs_max + asym_margin]
@@ -273,6 +267,7 @@ def create_limb_asymmetry_charts(asym_df, metric):
 
     return fig_lr, fig_asym
 
+
 def create_mean_std_chart(summary_df, metric, use_time_axis=False):
     """
     Creates mean/std chart across tests.
@@ -307,13 +302,24 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False):
     if df.empty:
         return None
 
-    # Oś X
+    if "Display Label" not in df.columns:
+        if "Plot Date" in df.columns:
+            tmp_dates = pd.to_datetime(df["Plot Date"], errors="coerce")
+            df["Display Label"] = tmp_dates.apply(
+                lambda d: d.strftime("%a %d-%m-%Y") if pd.notnull(d) else "Unknown date"
+            )
+        else:
+            df["Display Label"] = df["Test"].astype(str)
+
     if use_time_axis and "Plot Date" in df.columns:
-        x = pd.to_datetime(df["Plot Date"], errors="coerce")
+        x_dt = pd.to_datetime(df["Plot Date"], errors="coerce")
+        x = np.array(x_dt.dt.to_pydatetime())
         x_title = "Date"
+        hover_x = df["Display Label"].tolist()
     else:
-        x = df["Test"]
-        x_title = "Test"
+        x = df["Display Label"].tolist()
+        x_title = "Session"
+        hover_x = df["Display Label"].tolist()
 
     y = df[mean_col]
     error_y = df[std_col] if std_col in df.columns else None
@@ -326,13 +332,13 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False):
 
     fig = go.Figure()
 
-    # Główna seria: linia + punkty + error bars
     fig.add_trace(
         go.Scatter(
             x=x,
             y=y,
             mode="lines+markers",
             name=metric,
+            customdata=hover_x,
             error_y=dict(
                 type="data",
                 array=error_y,
@@ -340,7 +346,7 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False):
             ) if error_y is not None else None,
             hovertemplate=(
                 f"<b>{metric}</b><br>"
-                + f"{x_title}: %{{x}}<br>"
+                + "Session: %{customdata}<br>"
                 + "Mean: %{y:.2f}<br>"
                 + (f"Std: %{{error_y.array:.2f}}<br>" if error_y is not None else "")
                 + "<extra></extra>"
@@ -348,7 +354,6 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False):
         )
     )
 
-    # Specjalne tło dla asymetrii
     if is_asymmetry_metric:
         fig.add_hrect(
             y0=-10,
@@ -398,10 +403,22 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False):
         legend=dict(font=dict(color="black"))
     )
 
-    fig.update_xaxes(
-        title_font=dict(color="black"),
-        tickfont=dict(color="black")
-    )
+    if use_time_axis and "Plot Date" in df.columns:
+        tick_vals = np.array(pd.to_datetime(df["Plot Date"], errors="coerce").dt.to_pydatetime())
+        tick_text = df["Display Label"].tolist()
+
+        fig.update_xaxes(
+            tickmode="array",
+            tickvals=tick_vals,
+            ticktext=tick_text,
+            title_font=dict(color="black"),
+            tickfont=dict(color="black")
+        )
+    else:
+        fig.update_xaxes(
+            title_font=dict(color="black"),
+            tickfont=dict(color="black")
+        )
 
     fig.update_yaxes(
         title_font=dict(color="black"),
@@ -417,13 +434,26 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
     """
 
     fig = go.Figure()
+    df = summary_df.copy()
 
-    if use_time_axis and "Plot Date" in summary_df.columns:
-        x = pd.to_datetime(summary_df["Plot Date"], errors="coerce")
+    if "Display Label" not in df.columns:
+        if "Plot Date" in df.columns:
+            tmp_dates = pd.to_datetime(df["Plot Date"], errors="coerce")
+            df["Display Label"] = tmp_dates.apply(
+                lambda d: d.strftime("%a %d-%m-%Y") if pd.notnull(d) else "Unknown date"
+            )
+        else:
+            df["Display Label"] = df["Test"].astype(str)
+
+    if use_time_axis and "Plot Date" in df.columns:
+        x_dt = pd.to_datetime(df["Plot Date"], errors="coerce")
+        x = np.array(x_dt.dt.to_pydatetime())
         x_title = "Date"
+        hover_x = df["Display Label"].tolist()
     else:
-        x = summary_df["Test"]
-        x_title = "Test"
+        x = df["Display Label"].tolist()
+        x_title = "Session"
+        hover_x = df["Display Label"].tolist()
 
     for limb, color in [("Left", "blue"), ("Right", "red")]:
         if limb not in metric_map:
@@ -434,11 +464,11 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
         mean_col = f"{metric} Mean"
         std_col = f"{metric} Std"
 
-        if mean_col not in summary_df.columns:
+        if mean_col not in df.columns:
             continue
 
-        y = pd.to_numeric(summary_df[mean_col], errors="coerce")
-        error = pd.to_numeric(summary_df[std_col], errors="coerce") if std_col in summary_df else None
+        y = pd.to_numeric(df[mean_col], errors="coerce")
+        error = pd.to_numeric(df[std_col], errors="coerce") if std_col in df else None
 
         fig.add_trace(
             go.Scatter(
@@ -447,7 +477,15 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
                 mode="lines+markers",
                 name=f"{base_metric} - {limb}",
                 line=dict(color=color),
+                customdata=hover_x,
                 error_y=dict(type="data", array=error, visible=True) if error is not None else None,
+                hovertemplate=(
+                    f"<b>{base_metric} - {limb}</b><br>"
+                    + "Session: %{customdata}<br>"
+                    + "Mean: %{y:.2f}<br>"
+                    + (f"Std: %{{error_y.array:.2f}}<br>" if error is not None else "")
+                    + "<extra></extra>"
+                ),
             )
         )
 
@@ -461,12 +499,24 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
         template="plotly_white",
         title_font=dict(color="black"),
         legend=dict(font=dict(color="black"))
-        )
-
-    fig.update_xaxes(
-        title_font=dict(color="black"),
-        tickfont=dict(color="black")
     )
+
+    if use_time_axis and "Plot Date" in df.columns:
+        tick_vals = np.array(pd.to_datetime(df["Plot Date"], errors="coerce").dt.to_pydatetime())
+        tick_text = df["Display Label"].tolist()
+
+        fig.update_xaxes(
+            tickmode="array",
+            tickvals=tick_vals,
+            ticktext=tick_text,
+            title_font=dict(color="black"),
+            tickfont=dict(color="black")
+        )
+    else:
+        fig.update_xaxes(
+            title_font=dict(color="black"),
+            tickfont=dict(color="black")
+        )
 
     fig.update_yaxes(
         title_font=dict(color="black"),
@@ -474,9 +524,6 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
     )
 
     return fig
-
-
-
 
 
 def create_raw_force_plot(
@@ -501,7 +548,6 @@ def create_raw_force_plot(
 
     df_plot = df.copy()
 
-    # Downsampling dla wydajności wykresu
     if max_points is not None and len(df_plot) > max_points:
         step = max(1, len(df_plot) // max_points)
         df_plot = df_plot.iloc[::step].reset_index(drop=True)
@@ -554,6 +600,7 @@ def create_raw_force_plot(
     )
 
     return df_plot, fig
+
 
 def create_overlay_trials_chart(overlays: list):
     fig = go.Figure()

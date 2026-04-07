@@ -776,17 +776,31 @@ def main():
                                 st.warning("No metrics selected/found for preparation.")
                             else:
                                 summary_df, trials_data_per_test = prepare_tests_for_comparison(
-                                    st.session_state.tests_details_all,
-                                    selected_metrics=selected_metrics,
-                                    use_all_metrics=use_all_metrics_multi
+                                st.session_state.tests_details_all,
+                                selected_metrics=selected_metrics,
+                                use_all_metrics=use_all_metrics_multi
+                            )
+
+                            # Add readable display labels for X axis
+                            if summary_df is not None and not summary_df.empty:
+                                if "Plot Date" in summary_df.columns:
+                                    plot_dates = pd.to_datetime(summary_df["Plot Date"], errors="coerce")
+                                elif "Recorded Date" in summary_df.columns:
+                                    plot_dates = pd.to_datetime(summary_df["Recorded Date"], errors="coerce")
+                                else:
+                                    plot_dates = pd.Series([pd.NaT] * len(summary_df))
+
+                                summary_df["Plot Date"] = plot_dates
+
+                                summary_df["Display Label"] = plot_dates.apply(
+                                    lambda d: d.strftime("%d-%m-%Y %H:%M") if pd.notnull(d) else "Unknown date"
                                 )
 
-                                st.session_state.prepared_summary_data = summary_df
-                                st.session_state.prepared_comparison_data = trials_data_per_test
-                                st.session_state.graphs_generated = False
+                            st.session_state.prepared_summary_data = summary_df
+                            st.session_state.prepared_comparison_data = trials_data_per_test
+                            st.session_state.graphs_generated = False
 
-                                st.success("Data prepared successfully.")
-
+                            st.success("Data prepared successfully.")
                     if (
                         st.session_state.prepared_summary_data is not None
                         and not st.session_state.prepared_summary_data.empty

@@ -145,6 +145,8 @@ def main():
                             "overview_test_recorded_date",
                             "overview_test_type",
                             "overview_selected_metrics",
+                            "overview_selected_categories",
+                            "overview_resolved_metrics",
 
                             # tab 2
                             "tests_details_all",
@@ -232,7 +234,13 @@ def main():
                 st.session_state.overview_selected_test = None
 
             if "overview_selected_metrics" not in st.session_state:
-                st.session_state.overview_selected_metrics = {}   
+                st.session_state.overview_selected_metrics = {}
+
+            if "overview_selected_categories" not in st.session_state:
+                st.session_state.overview_selected_categories = {}
+
+            if "overview_resolved_metrics" not in st.session_state:
+                st.session_state.overview_resolved_metrics = {}
 
             st.header("Training Sessions Overview")
 
@@ -252,6 +260,7 @@ def main():
                 modified_from_utc=modified_from_utc,
                 page_number=1,
             )
+
             if data and "tests" in data:
                 tests_list = data["tests"]
                 if tests_list:
@@ -265,8 +274,16 @@ def main():
                         "Test ID", "Profile ID", "Test Type", "Recorded Date",
                         "Analysed Date", "Weight (kg)", "Notes"
                     ]
-                    df_display["Recorded Date"] = pd.to_datetime(df_display["Recorded Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
-                    df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
+                    df_display["Recorded Date"] = pd.to_datetime(
+                        df_display["Recorded Date"],
+                        format='ISO8601',
+                        errors='coerce'
+                    ).dt.strftime("%Y-%m-%d %H:%M")
+                    df_display["Analysed Date"] = pd.to_datetime(
+                        df_display["Analysed Date"],
+                        format='ISO8601',
+                        errors='coerce'
+                    ).dt.strftime("%Y-%m-%d %H:%M")
 
                     st.dataframe(df_display, width="stretch")
 
@@ -274,7 +291,9 @@ def main():
 
                     st.subheader("Select Test for Details")
                     test_options = [
-                        f"{test.get('testType', 'Unknown')} - {pd.to_datetime(test.get('recordedDateUtc'), format='ISO8601', errors='coerce').strftime('%Y-%m-%d %H:%M') if test.get('recordedDateUtc') else 'Unknown Date'} (ID: {test.get('testId', 'N/A')})"
+                        f"{test.get('testType', 'Unknown')} - "
+                        f"{pd.to_datetime(test.get('recordedDateUtc'), format='ISO8601', errors='coerce').strftime('%Y-%m-%d %H:%M') if test.get('recordedDateUtc') else 'Unknown Date'} "
+                        f"(ID: {test.get('testId', 'N/A')})"
                         for test in tests_list
                     ]
 
@@ -301,9 +320,14 @@ def main():
                                 st.session_state.overview_current_tenant_id = tenant_id
                                 st.session_state.overview_test_recorded_date = selected_test.get('recordedDateUtc')
                                 st.session_state.overview_test_type = selected_test.get('testType')
-                        
 
-                                
+                                # reset selection state for newly loaded test
+                                if test_id not in st.session_state.overview_selected_metrics:
+                                    st.session_state.overview_selected_metrics[test_id] = []
+
+                                if test_id not in st.session_state.overview_selected_categories:
+                                    st.session_state.overview_selected_categories[test_id] = []
+
                             else:
                                 st.error("Failed to load test details.")
 
@@ -331,33 +355,96 @@ def main():
                             st.write(f"**Number of trials:** {len(specific_test_details)}")
 
                             current_test_id = st.session_state.get("overview_current_test_id")
+                            current_test_type = st.session_state.get("overview_test_type")
+                            current_tenant_id = st.session_state.get("overview_current_tenant_id")
+                            current_recorded_date = st.session_state.get("overview_test_recorded_date")
+
                             available_trial_metrics = get_all_trial_metric_names(specific_test_details)
 
-                            default_metrics = [
-                                m for m in [
-                                    'Jump Height (Flight Time)',
-                                    'Peak Power',
-                                    'Countermovement Depth',
-                                    'Peak Landing Force',
-                                    'Bodyweight in Kilograms',
-                                    'Flight Time',
-                                    'Contraction Time',
-                                    'RSI-modified',
-                                ]
-                                if m in available_trial_metrics
-                            ]
+                            available_metric_entries = extract_available_metrics_from_tests([
+                                {
+                                    "test_id": current_test_id,
+                                    "tenant_id": current_tenant_id,
+                                    "recorded_date_utc": current_recorded_date,
+                                    "test_type": current_test_type,
+                                    "trials": specific_test_details
+                                }
+                            ])
 
-                            if current_test_id not in st.session_state.overview_selected_metrics:
-                                st.session_state.overview_selected_metrics[current_test_id] = default_metrics
-
-                            selected_overview_metrics = st.multiselect(
-                                "Select Trial-level metrics for trial comparison:",
-                                options=available_trial_metrics,
-                                key=f"overview_metrics_{current_test_id}",
-                                default=st.session_state.overview_selected_metrics[current_test_id]
+                            available_categories_for_type = list(
+                                TEST_TYPE_METRIC_CATEGORIES.get(current_test_type, {}).keys()
                             )
 
-                            st.session_state.overview_selected_metrics[current_test_id] = selected_overview_metrics
+                            selected_overview_metrics = []
+
+                            if available_categories_for_type:
+                                resolved_category_metrics, unmatched_category_metrics = resolve_category_metrics_for_test_type(
+                                    current_test_type,
+                                    available_metric_entries
+                                )
+
+                                if (
+                                    current_test_id not in st.session_state.overview_selected_categories
+                                    or not st.session_state.overview_selected_categories[current_test_id]
+                                ):
+                                    default_categories = [
+                                        c for c in ["Output", "Monitoring", "Concentric", "Landing"]
+                                        if c in available_categories_for_type
+                                    ]
+                                    st.session_state.overview_selected_categories[current_test_id] = default_categories
+
+                                selected_categories = st.multiselect(
+                                    "Select metric categories for trial comparison:",
+                                    options=available_categories_for_type,
+                                    default=st.session_state.overview_selected_categories[current_test_id],
+                                    key=f"overview_categories_{current_test_id}"
+                                )
+
+                                st.session_state.overview_selected_categories[current_test_id] = selected_categories
+                                st.session_state.overview_resolved_metrics[current_test_id] = resolved_category_metrics
+
+                                for category in selected_categories:
+                                    selected_overview_metrics.extend(resolved_category_metrics.get(category, []))
+
+                                selected_overview_metrics = list(dict.fromkeys(selected_overview_metrics))
+
+                                with st.expander("Debug: matched and unmatched metrics for this test", expanded=False):
+                                    st.write("Test type:", current_test_type)
+                                    st.write("Available categories:", available_categories_for_type)
+                                    st.write("Selected categories:", selected_categories)
+                                    st.write("Matched metrics by category:", resolved_category_metrics)
+                                    st.write("Unmatched metrics by category:", unmatched_category_metrics)
+                                    st.write("Final selected metrics:", selected_overview_metrics)
+
+                            else:
+                                default_metrics = [
+                                    m for m in [
+                                        'Jump Height (Flight Time)',
+                                        'Peak Power',
+                                        'Countermovement Depth',
+                                        'Peak Landing Force',
+                                        'Bodyweight in Kilograms',
+                                        'Flight Time',
+                                        'Contraction Time',
+                                        'RSI-modified',
+                                    ]
+                                    if m in available_trial_metrics
+                                ]
+
+                                if (
+                                    current_test_id not in st.session_state.overview_selected_metrics
+                                    or not st.session_state.overview_selected_metrics[current_test_id]
+                                ):
+                                    st.session_state.overview_selected_metrics[current_test_id] = default_metrics
+
+                                selected_overview_metrics = st.multiselect(
+                                    "Select Trial-level metrics for trial comparison:",
+                                    options=available_trial_metrics,
+                                    key=f"overview_metrics_{current_test_id}",
+                                    default=st.session_state.overview_selected_metrics[current_test_id]
+                                )
+
+                                st.session_state.overview_selected_metrics[current_test_id] = selected_overview_metrics
 
                             comparison_data = {}
                             for i, trial in enumerate(specific_test_details):
@@ -506,7 +593,6 @@ def main():
 
         except Exception as e:
             st.error(f"Could not fetch data: {str(e)}")
-
     elif display_mode == "Multiple trainings comparison":
 
         if "tests_details_all" not in st.session_state:

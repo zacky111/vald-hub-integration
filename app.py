@@ -46,10 +46,6 @@ def main():
         margin-top: 0.2rem !important;
         margin-bottom: 0.2rem !important;
     }
-    header[data-testid="stHeader"] {
-    display: none;
-    }
-
     h1 {
         margin-top: 0rem !important;
     }

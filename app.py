@@ -20,6 +20,8 @@ from src.data_prep_funcs import detect_movement_onset_events, prepare_overlay_tr
 from src.metric_categories import TEST_TYPE_METRIC_CATEGORIES
 
 
+APP_VERSION = "1.1"
+
 @st.cache_resource
 def get_vald_client():
     """Get cached ValdHubClient instance - persists across Streamlit reruns"""
@@ -68,6 +70,7 @@ def main():
 
                 if api_connected:
                     st.success("✅ Connected to Vald Hub API. ")
+                    st.caption(f"App version: {APP_VERSION}")
                 else:
                     st.info("Configure `.env` file with your Vald Hub credentials")
             except Exception as e:

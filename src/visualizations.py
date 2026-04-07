@@ -6,22 +6,50 @@ import plotly.graph_objects as go
 from src.data_prep_funcs import parse_forcedeck_raw_data
 
 
-def create_metrics_comparison_chart(comp_df, metric):
+def _add_linear_trendline(fig, x_values, y_values, name="Trendline", color="black", dash="dot"):
+    """
+    Adds a simple linear trendline based on numeric x positions.
+    Works for both categorical and datetime x axes by fitting on index positions.
+    """
+    y_numeric = pd.to_numeric(pd.Series(y_values), errors="coerce")
+    valid_mask = y_numeric.notna()
+
+    if valid_mask.sum() < 2:
+        return fig
+
+    x_plot = list(pd.Series(x_values)[valid_mask].values)
+    y_plot = y_numeric[valid_mask].values
+    x_idx = np.arange(len(y_plot))
+
+    if len(x_idx) < 2:
+        return fig
+
+    slope, intercept = np.polyfit(x_idx, y_plot, 1)
+    trend_y = slope * x_idx + intercept
+
+    fig.add_trace(
+        go.Scatter(
+            x=x_plot,
+            y=trend_y,
+            mode="lines",
+            name=name,
+            line=dict(color=color, dash=dash, width=2),
+            hovertemplate="<b>Trendline</b><br>Value: %{y:.2f}<extra></extra>"
+        )
+    )
+
+    return fig
+
+
+def create_metrics_comparison_chart(comp_df, metric, show_trendline=False):
     """
     Create a scatter plot with lines for a specific metric across trials, including average line.
-
-    Args:
-        comp_df (pd.DataFrame): DataFrame with trials as rows and metrics as columns
-        metric (str): The metric name to plot
-
-    Returns:
-        plotly.graph_objects.Figure: The scatter plot figure
     """
     if metric not in comp_df.columns:
         return None
 
     trials_df = comp_df.loc[comp_df.index.to_series().str.startswith('Trial')]
-    metric_data = trials_df[metric].dropna()
+    metric_data = pd.to_numeric(trials_df[metric], errors="coerce").dropna()
 
     if len(metric_data) > 1:
         fig = px.scatter(
@@ -30,7 +58,7 @@ def create_metrics_comparison_chart(comp_df, metric):
             title=f'{metric} Across Trials',
             labels={'x': 'Trial', 'y': 'Value'}
         )
-        fig.update_traces(mode='lines+markers')
+        fig.update_traces(mode='lines+markers', name=metric)
 
         avg_value = metric_data.mean()
         fig.add_hline(
@@ -38,6 +66,23 @@ def create_metrics_comparison_chart(comp_df, metric):
             line_dash="dash",
             line_color="red",
             annotation_text=f"Average: {avg_value:.2f}"
+        )
+
+        if show_trendline:
+            fig = _add_linear_trendline(
+                fig,
+                x_values=metric_data.index.tolist(),
+                y_values=metric_data.values,
+                name="Trendline"
+            )
+
+        fig.update_layout(
+            template="plotly_white",
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            font=dict(color="black"),
+            title_font=dict(color="black"),
+            legend=dict(font=dict(color="black"))
         )
 
         return fig
@@ -51,9 +96,6 @@ def create_limb_asymmetry_chart(asym_df, metric):
     - Left / Right shown as bars on primary Y axis
     - Asym shown as horizontal bar from 0 to value on secondary Y axis (%)
     - Asym value is displayed directly as text on the chart
-
-    This avoids mixing absolute values (e.g. N) with percentages on one axis
-    and makes the asymmetry sign/direction much easier to read.
     """
     metric_data = asym_df[asym_df['Metric Name'] == metric].copy()
 
@@ -157,9 +199,6 @@ def create_limb_asymmetry_charts(asym_df, metric):
     Returns two separate charts:
     1. Left / Right absolute values
     2. Asymmetry (%) shown separately around zero
-
-    This is much clearer than mixing absolute values and percentages
-    on one figure with dual axes.
     """
     metric_data = asym_df[asym_df['Metric Name'] == metric].copy()
 
@@ -268,7 +307,7 @@ def create_limb_asymmetry_charts(asym_df, metric):
     return fig_lr, fig_asym
 
 
-def create_mean_std_chart(summary_df, metric, use_time_axis=False):
+def create_mean_std_chart(summary_df, metric, use_time_axis=False, show_trendline=False):
     """
     Creates mean/std chart across tests.
 
@@ -354,6 +393,14 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False):
         )
     )
 
+    if show_trendline:
+        fig = _add_linear_trendline(
+            fig,
+            x_values=x,
+            y_values=y,
+            name="Trendline"
+        )
+
     if is_asymmetry_metric:
         fig.add_hrect(
             y0=-10,
@@ -428,7 +475,7 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False):
     return fig
 
 
-def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=False):
+def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=False, show_trendline=False):
     """
     Rysuje Left + Right na jednym wykresie
     """
@@ -489,6 +536,16 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
             )
         )
 
+        if show_trendline:
+            fig = _add_linear_trendline(
+                fig,
+                x_values=x,
+                y_values=y,
+                name=f"{base_metric} - {limb} Trendline",
+                color=color,
+                dash="dot"
+            )
+
     fig.update_layout(
         title=f"{base_metric} (Left vs Right)",
         xaxis_title=x_title,
@@ -533,16 +590,6 @@ def create_raw_force_plot(
 ):
     """
     Tworzy wykres raw data dla lewej nogi, prawej nogi oraz sumy.
-
-    Parametry:
-    - raw_data: payload z API
-    - title: tytuł wykresu
-    - max_points: opcjonalne ograniczenie liczby punktów dla wydajności
-                  (np. przy 127k próbkach). Jeśli None, rysuje wszystko.
-
-    Zwraca:
-    - df_plot: DataFrame użyty do wykresu
-    - fig: obiekt Plotly Figure
     """
     df = parse_forcedeck_raw_data(raw_data)
 

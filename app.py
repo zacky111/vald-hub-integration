@@ -88,7 +88,7 @@ def main():
                     'unmatched_category_metrics', 'use_all_metrics_multi',
                     'overview_selected_test', 'overview_specific_test_details',
                     'overview_current_test_id', 'overview_current_tenant_id',
-                    'overview_test_recorded_date', 'overview_test_type'
+                    'overview_test_recorded_date', 'overview_test_type', 'show_trendline',
                 ]:
                     if key in st.session_state:
                         del st.session_state[key]
@@ -147,6 +147,7 @@ def main():
                             "overview_selected_metrics",
                             "overview_selected_categories",
                             "overview_resolved_metrics",
+                            "show_trendline",
 
                             # tab 2
                             "tests_details_all",
@@ -625,6 +626,9 @@ def main():
         if "use_time_axis" not in st.session_state:
             st.session_state.use_time_axis = False
 
+        if "show_trendline" not in st.session_state:
+            st.session_state.show_trendline = False
+
         if "excluded_tests_text" not in st.session_state:
             st.session_state.excluded_tests_text = ""
 
@@ -903,17 +907,24 @@ def main():
                             st.write("Final selected metrics:", st.session_state.selected_metrics[:200])
                             st.write("Columns in prepared summary data:", list(st.session_state.prepared_summary_data.columns))
 
-                        col_btn, col_chk = st.columns([1, 2])
+                        col_btn, col_chk1, col_chk2 = st.columns([1, 1, 1])
 
                         with col_btn:
                             if st.button("Generate graphs", key="generate_graphs"):
                                 st.session_state.graphs_generated = True
 
-                        with col_chk:
+                        with col_chk1:
                             st.checkbox(
                                 "Use time scale on X axis",
                                 value=st.session_state.use_time_axis,
                                 key="use_time_axis"
+                            )
+
+                        with col_chk2:
+                            st.checkbox(
+                                "Show trendline",
+                                value=st.session_state.show_trendline,
+                                key="show_trendline"
                             )
 
                     if (
@@ -936,7 +947,8 @@ def main():
                                     fig = create_mean_std_chart(
                                         st.session_state.prepared_summary_data,
                                         metric,
-                                        use_time_axis=st.session_state.use_time_axis
+                                        use_time_axis=st.session_state.use_time_axis,
+                                        show_trendline=st.session_state.show_trendline
                                     )
                                     if fig:
                                         st.plotly_chart(fig, width="stretch")
@@ -960,7 +972,8 @@ def main():
                                                 st.session_state.prepared_summary_data,
                                                 base_metric,
                                                 metric_map,
-                                                use_time_axis=st.session_state.use_time_axis
+                                                use_time_axis=st.session_state.use_time_axis,
+                                                show_trendline=st.session_state.show_trendline
                                             )
                                             if fig:
                                                 st.plotly_chart(fig, width="stretch")
@@ -971,7 +984,8 @@ def main():
                                                 fig = create_mean_std_chart(
                                                     st.session_state.prepared_summary_data,
                                                     metric_map["Trial"],
-                                                    use_time_axis=st.session_state.use_time_axis
+                                                    use_time_axis=st.session_state.use_time_axis,
+                                                    show_trendline=st.session_state.show_trendline
                                                 )
                                                 if fig:
                                                     st.plotly_chart(fig, width="stretch")
@@ -983,7 +997,8 @@ def main():
                                                 fig = create_mean_std_chart(
                                                     st.session_state.prepared_summary_data,
                                                     metric,
-                                                    use_time_axis=st.session_state.use_time_axis
+                                                    use_time_axis=st.session_state.use_time_axis,
+                                                    show_trendline=st.session_state.show_trendline
                                                 )
                                                 if fig:
                                                     st.plotly_chart(fig, width="stretch")

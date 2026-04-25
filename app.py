@@ -20,7 +20,7 @@ from src.data_prep_funcs import detect_movement_onset_events, prepare_overlay_tr
 from src.metric_categories import TEST_TYPE_METRIC_CATEGORIES
 
 
-APP_VERSION = "1.5"
+APP_VERSION = "1.5.1"
 
 @st.cache_resource
 def get_vald_client():
@@ -972,7 +972,7 @@ def main():
                                                 show_trendline=st.session_state.show_trendline
                                             )
                                             if fig:
-                                                st.plotly_chart(fig, width="stretch")
+                                                st.plotly_chart(fig, width="stretch", key=f"{category}_{base_metric}_lr")
                                                 plotted_any = True
 
                                             # opcjonalnie dalej pokaż Trial osobno, jeśli istnieje
@@ -984,7 +984,7 @@ def main():
                                                     show_trendline=st.session_state.show_trendline
                                                 )
                                                 if fig:
-                                                    st.plotly_chart(fig, width="stretch")
+                                                    st.plotly_chart(fig, width="stretch", key=f"{category}_{base_metric}_trial")
                                                     plotted_any = True
 
                                         else:
@@ -997,7 +997,7 @@ def main():
                                                     show_trendline=st.session_state.show_trendline
                                                 )
                                                 if fig:
-                                                    st.plotly_chart(fig, width="stretch")
+                                                    st.plotly_chart(fig, width="stretch", key=f"{category}_{base_metric}_{limb}")
                                                     plotted_any = True
 
                                     if not plotted_any:

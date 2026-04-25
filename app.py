@@ -20,7 +20,7 @@ from src.data_prep_funcs import detect_movement_onset_events, prepare_overlay_tr
 from src.metric_categories import TEST_TYPE_METRIC_CATEGORIES
 
 
-APP_VERSION = "1.4"
+APP_VERSION = "1.5"
 
 @st.cache_resource
 def get_vald_client():

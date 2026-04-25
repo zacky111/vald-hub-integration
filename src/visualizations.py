@@ -307,7 +307,7 @@ def create_limb_asymmetry_charts(asym_df, metric):
     return fig_lr, fig_asym
 
 
-def create_mean_std_chart(summary_df, metric, use_time_axis=False, show_trendline=False):
+def create_mean_std_chart(summary_df, metric, use_time_axis=False, show_trendline=False, show_best1_trial=False):
     """
     Creates mean/std chart across tests.
 
@@ -322,6 +322,7 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False, show_trendlin
 
     mean_col = f"{metric} Mean"
     std_col = f"{metric} Std"
+    top1_col = f"{metric} Top1"
 
     if summary_df is None or summary_df.empty:
         return None
@@ -392,6 +393,30 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False, show_trendlin
             ),
         )
     )
+
+    if show_best1_trial and not is_asymmetry_metric and top1_col in df.columns:
+        df[top1_col] = pd.to_numeric(df[top1_col], errors="coerce")
+
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=df[top1_col],
+                mode="markers",
+                name=f"{metric} (Top 1 - by Flight Time)",
+                marker=dict(
+                    size=8,
+                    symbol="diamond",
+                    line=dict(width=2)
+                ),
+                customdata=hover_x,
+                hovertemplate=(
+                    f"<b>{metric} (Top 1 - by Flight Time)</b><br>"
+                    + "Session: %{customdata}<br>"
+                    + "Value: %{y:.2f}<br>"
+                    + "<extra></extra>"
+                ),
+            )
+        )
 
     if show_trendline:
         fig = _add_linear_trendline(
@@ -475,11 +500,14 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False, show_trendlin
     return fig
 
 
-def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=False, show_trendline=False):
-    """
-    Rysuje Left + Right na jednym wykresie
-    """
-
+def create_left_right_chart(
+    summary_df,
+    base_metric,
+    metric_map,
+    use_time_axis=False,
+    show_trendline=False,
+    show_best1_trial=False
+):
     fig = go.Figure()
     df = summary_df.copy()
 
@@ -510,31 +538,57 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
 
         mean_col = f"{metric} Mean"
         std_col = f"{metric} Std"
+        top1_col = f"{metric} Top1"
 
         if mean_col not in df.columns:
             continue
 
         y = pd.to_numeric(df[mean_col], errors="coerce")
-        error = pd.to_numeric(df[std_col], errors="coerce") if std_col in df else None
+        error = pd.to_numeric(df[std_col], errors="coerce") if std_col in df.columns else None
 
         fig.add_trace(
             go.Scatter(
                 x=x,
                 y=y,
                 mode="lines+markers",
-                name=f"{base_metric} - {limb}",
+                name=f"{base_metric} - {limb} Mean Top 3",
                 line=dict(color=color),
                 customdata=hover_x,
                 error_y=dict(type="data", array=error, visible=True) if error is not None else None,
                 hovertemplate=(
                     f"<b>{base_metric} - {limb}</b><br>"
                     + "Session: %{customdata}<br>"
-                    + "Mean: %{y:.2f}<br>"
+                    + "Mean Top 3: %{y:.2f}<br>"
                     + (f"Std: %{{error_y.array:.2f}}<br>" if error is not None else "")
                     + "<extra></extra>"
                 ),
             )
         )
+
+        if show_best1_trial and top1_col in df.columns:
+            top1_y = pd.to_numeric(df[top1_col], errors="coerce")
+
+            fig.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=top1_y,
+                    mode="markers",
+                    name=f"{base_metric} - {limb} Top 1",
+                    marker=dict(
+                        color=color,
+                        size=11,
+                        symbol="diamond",
+                        line=dict(width=2, color="black")
+                    ),
+                    customdata=hover_x,
+                    hovertemplate=(
+                        f"<b>{base_metric} - {limb} Top 1</b><br>"
+                        + "Session: %{customdata}<br>"
+                        + "Value: %{y:.2f}<br>"
+                        + "<extra></extra>"
+                    ),
+                )
+            )
 
         if show_trendline:
             fig = _add_linear_trendline(
@@ -550,10 +604,12 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
         title=f"{base_metric} (Left vs Right)",
         xaxis_title=x_title,
         yaxis_title=base_metric,
+        hovermode="x unified",
+        template="plotly_white",
+        height=500,
         plot_bgcolor="white",
         paper_bgcolor="white",
         font=dict(color="black"),
-        template="plotly_white",
         title_font=dict(color="black"),
         legend=dict(font=dict(color="black"))
     )
@@ -581,7 +637,6 @@ def create_left_right_chart(summary_df, base_metric, metric_map, use_time_axis=F
     )
 
     return fig
-
 
 def create_raw_force_plot(
     raw_data: dict,

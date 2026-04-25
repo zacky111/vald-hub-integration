@@ -20,7 +20,7 @@ from src.data_prep_funcs import detect_movement_onset_events, prepare_overlay_tr
 from src.metric_categories import TEST_TYPE_METRIC_CATEGORIES
 
 
-APP_VERSION = "1.5.1"
+APP_VERSION = "1.5.2"
 
 @st.cache_resource
 def get_vald_client():
@@ -625,6 +625,9 @@ def main():
         if "show_trendline" not in st.session_state:
             st.session_state.show_trendline = False
 
+        if "add_best1_visualization" not in st.session_state:
+            st.session_state.add_best1_visualization = False
+
         if "excluded_tests_text" not in st.session_state:
             st.session_state.excluded_tests_text = ""
 
@@ -651,7 +654,7 @@ def main():
         with col3:
             type_of_test = st.selectbox(
                 "Select test type:",
-                ["All", "CMJ"],
+                ["CMJ", "SLJ", "All"],
                 key="test_type_selector"
             )
 
@@ -903,7 +906,7 @@ def main():
                             st.write("Final selected metrics:", st.session_state.selected_metrics[:200])
                             st.write("Columns in prepared summary data:", list(st.session_state.prepared_summary_data.columns))
 
-                        col_btn, col_chk1, col_chk2 = st.columns([1, 1, 1])
+                        col_btn, col_chk1, col_chk2, col1_chk3 = st.columns([1, 1, 1, 1])
 
                         with col_btn:
                             if st.button("Generate graphs", key="generate_graphs"):
@@ -921,6 +924,13 @@ def main():
                                 "Show trendline",
                                 value=st.session_state.show_trendline,
                                 key="show_trendline"
+                            )
+
+                        with col1_chk3:
+                            st.checkbox(
+                                "Add visualization of best 1 trial",
+                                value=st.session_state.add_best1_visualization,
+                                key="add_best1_visualization"
                             )
 
                     if (
@@ -944,7 +954,8 @@ def main():
                                         st.session_state.prepared_summary_data,
                                         metric,
                                         use_time_axis=st.session_state.use_time_axis,
-                                        show_trendline=st.session_state.show_trendline
+                                        show_trendline=st.session_state.show_trendline,
+                                        show_best1_trial=st.session_state.add_best1_visualization
                                     )
                                     if fig:
                                         st.plotly_chart(fig, width="stretch")
@@ -969,19 +980,34 @@ def main():
                                                 base_metric,
                                                 metric_map,
                                                 use_time_axis=st.session_state.use_time_axis,
-                                                show_trendline=st.session_state.show_trendline
+                                                show_trendline=st.session_state.show_trendline,
+                                                show_best1_trial=st.session_state.add_best1_visualization
+
                                             )
                                             if fig:
                                                 st.plotly_chart(fig, width="stretch", key=f"{category}_{base_metric}_lr")
                                                 plotted_any = True
 
                                             # opcjonalnie dalej pokaż Trial osobno, jeśli istnieje
-                                            if "Trial" in metric_map:
+                                            if "Trial" in metric_map and category != "Asymmetry":
                                                 fig = create_mean_std_chart(
                                                     st.session_state.prepared_summary_data,
                                                     metric_map["Trial"],
                                                     use_time_axis=st.session_state.use_time_axis,
-                                                    show_trendline=st.session_state.show_trendline
+                                                    show_trendline=st.session_state.show_trendline,
+                                                    show_best1_trial=st.session_state.add_best1_visualization
+                                                )
+                                                if fig:
+                                                    st.plotly_chart(fig, width="stretch", key=f"{category}_{base_metric}_trial")
+                                                    plotted_any = True
+
+                                            if "Trial" in metric_map and category == "Asymmetry":
+                                                fig = create_mean_std_chart(
+                                                    st.session_state.prepared_summary_data,
+                                                    metric_map["Trial"],
+                                                    use_time_axis=st.session_state.use_time_axis,
+                                                    show_trendline=st.session_state.show_trendline,
+                                                    show_best1_trial=False
                                                 )
                                                 if fig:
                                                     st.plotly_chart(fig, width="stretch", key=f"{category}_{base_metric}_trial")
@@ -994,7 +1020,8 @@ def main():
                                                     st.session_state.prepared_summary_data,
                                                     metric,
                                                     use_time_axis=st.session_state.use_time_axis,
-                                                    show_trendline=st.session_state.show_trendline
+                                                    show_trendline=st.session_state.show_trendline,
+                                                    show_best1_trial=st.session_state.add_best1_visualization
                                                 )
                                                 if fig:
                                                     st.plotly_chart(fig, width="stretch", key=f"{category}_{base_metric}_{limb}")

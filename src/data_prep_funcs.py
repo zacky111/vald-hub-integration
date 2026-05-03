@@ -432,7 +432,7 @@ def find_jump_height_column(df: pd.DataFrame):
     Fallback:
     - Jump Height...
     """
-    preferred = "Jump Height (Flight Time)"
+    preferred = "JUMP_HEIGHT_IMP_MOM"
     if preferred in df.columns:
         return preferred
 

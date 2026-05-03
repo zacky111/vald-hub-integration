@@ -20,7 +20,7 @@ from src.data_prep_funcs import detect_movement_onset_events, prepare_overlay_tr
 from src.metric_categories import TEST_TYPE_METRIC_CATEGORIES
 
 
-APP_VERSION = "1.5.2"
+APP_VERSION = "1.5.3"
 
 @st.cache_resource
 def get_vald_client():
@@ -166,12 +166,12 @@ def main():
 
                     st.session_state.selected_athlete_id_for_context = athlete_id
 
-                    athlete_weight = athlete_obj.get('weight', 'N/A')
+                    
                     athlete_date_of_birth = athlete_obj.get('dateOfBirth', 'N/A')
 
                     col1, col2 = st.columns(2)
-                    col1.metric("Weight (kg)", athlete_weight)
-                    col2.metric("Date of Birth", athlete_date_of_birth[:10 if athlete_date_of_birth != 'N/A' else None])
+        
+                    col1.metric("Date of Birth", athlete_date_of_birth[:10 if athlete_date_of_birth != 'N/A' else None])
 
                 else:
                     st.warning("No athletes found")

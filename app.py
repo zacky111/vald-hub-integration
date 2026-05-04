@@ -682,13 +682,13 @@ def main():
             if tests_list:
                 df = pd.DataFrame(tests_list)
 
-                columns_to_show = ['tenantId', "testType", "recordedDateUtc", "analysedDateUtc", "weight", "notes"]
+                columns_to_show = ["testType", "recordedDateUtc", "weight", "notes"]
                 df_display = df.reindex(columns=columns_to_show, fill_value='').copy()
-                df_display.insert(0, "Test Number", range(len(df_display)))
-                df_display.columns = ["Test Number", "Tenant ID", "Test Type", "Recorded Date", "Analysed Date", "Weight (kg)", "Notes"]
+                #df_display.insert(0, "Test Number", range(len(df_display)))
+                df_display.columns = ["Test Type", "Recorded Date", "Weight (kg)", "Notes"]
 
                 df_display["Recorded Date"] = pd.to_datetime(df_display["Recorded Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
-                df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
+                #df_display["Analysed Date"] = pd.to_datetime(df_display["Analysed Date"], format='ISO8601', errors='coerce').dt.strftime("%Y-%m-%d %H:%M")
 
                 st.dataframe(df_display, width="stretch")
                 st.caption("Test Number corresponds to index in the table (starting from 0).")
@@ -758,7 +758,7 @@ def main():
 
                         selected_tests = [t for t in tests_list if t.get("testId") in chosen_test_ids]
 
-                        st.write(f"Comparing tests with IDs: {chosen_test_ids}")
+                        #st.write(f"Comparing tests with IDs: {chosen_test_ids}")
                         progress_bar = st.progress(0, text="Loading test details...")
 
                         for index, test_obj in enumerate(selected_tests):

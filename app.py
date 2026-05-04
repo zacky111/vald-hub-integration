@@ -635,8 +635,9 @@ def main():
             st.session_state.use_all_metrics_multi = False
 
         default_from = datetime.now().date() - pd.Timedelta(days=30)
+        date_now=str(datetime.now().date())
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             modified_from = st.date_input(
                 "Show sessions from date:",
@@ -645,24 +646,15 @@ def main():
             )
 
         with col2:
-            modified_to = st.date_input(
-                "Show sessions until date: \n(currently not working - always till today)",
-                value=datetime.now().date(),
-                key="modified_to_multi"
-            )
-
-        with col3:
             type_of_test = st.selectbox(
                 "Select test type:",
                 ["CMJ", "SLJ", "All"],
                 key="test_type_selector"
             )
 
-        
 
         modified_from_utc = datetime.combine(modified_from, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        modified_to_utc = datetime.combine(modified_to, datetime.max.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        st.caption(f"Current filter: date from {modified_from_utc[:10]} to {modified_to_utc[:10]}")
+        st.caption(f"Current filter: date from {modified_from_utc[:10]} to {date_now[:10]}")
 
         data = client.get_training_sessions_all(
             profile_id=athlete_id,
@@ -707,13 +699,17 @@ def main():
                 col_range, col_exclude = st.columns([2, 1])
 
                 with col_range:
-                    amount_of_tests = st.slider(
-                        "Select test index range:",
-                        min_value=0,
-                        max_value=len(test_ids) - 1,
-                        value=[max(0, len(test_ids) - 2), len(test_ids) - 1],
-                        key="num_tests_selector"
-                    )
+                    if len(test_ids) == 1:
+                        amount_of_tests = [0, 0]
+                        st.info("Only one session found, so range selection is disabled.")
+                    else:
+                        amount_of_tests = st.slider(
+                            "Select test index range:",
+                            min_value=0,
+                            max_value=len(test_ids) - 1,
+                            value=[max(0, len(test_ids) - 2), len(test_ids) - 1],
+                            key="num_tests_selector"
+                        )
 
                 with col_exclude:
                     excluded_tests_text = st.text_input(

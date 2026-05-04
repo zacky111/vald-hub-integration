@@ -402,7 +402,7 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False, show_trendlin
                 x=x,
                 y=df[top1_col],
                 mode="markers",
-                name=f"{metric} (Top 1 - by Flight Time)",
+                name=f"{metric} (Top 1 - by Jump height \n(Imp-Mom))",
                 marker=dict(
                     size=8,
                     symbol="diamond",
@@ -410,7 +410,7 @@ def create_mean_std_chart(summary_df, metric, use_time_axis=False, show_trendlin
                 ),
                 customdata=hover_x,
                 hovertemplate=(
-                    f"<b>{metric} (Top 1 - by Flight Time)</b><br>"
+                    f"<b>{metric} (Top 1 - by Jump height (Imp-Mom)))</b><br>"
                     + "Session: %{customdata}<br>"
                     + "Value: %{y:.2f}<br>"
                     + "<extra></extra>"

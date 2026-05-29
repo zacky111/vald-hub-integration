@@ -739,3 +739,265 @@ def create_overlay_trials_chart(overlays: list):
     )
 
     return fig
+
+
+def create_slj_left_right_summary_chart(
+    summary_df,
+    metric,
+    use_time_axis=False,
+    show_trendline=False,
+    show_best1_trial=False
+):
+    mean_col = f"{metric} Mean"
+    std_col = f"{metric} Std"
+    top1_col = f"{metric} Top1"
+
+    if summary_df is None or summary_df.empty or mean_col not in summary_df.columns:
+        return None
+
+    if "Test Type" not in summary_df.columns or "SLJ Side" not in summary_df.columns:
+        return None
+
+    df = summary_df.copy()
+    df = df[df["Test Type"].eq("SLJ")]
+    df = df[df["SLJ Side"].isin(["Left", "Right"])]
+
+    if df.empty:
+        return None
+
+    df[mean_col] = pd.to_numeric(df[mean_col], errors="coerce")
+    if std_col in df.columns:
+        df[std_col] = pd.to_numeric(df[std_col], errors="coerce")
+    if top1_col in df.columns:
+        df[top1_col] = pd.to_numeric(df[top1_col], errors="coerce")
+
+    df = df.dropna(subset=[mean_col])
+    if df.empty:
+        return None
+
+    if "Display Label" not in df.columns:
+        df["Display Label"] = df["Test"].astype(str)
+
+    sessions = df["Display Label"].drop_duplicates().tolist()
+    session_pos = {session: i for i, session in enumerate(sessions)}
+
+    fig = go.Figure()
+
+    side_offsets = {
+        "Left": -0.12,
+        "Right": 0.12,
+    }
+
+    for side in ["Left", "Right"]:
+        side_df = df[df["SLJ Side"].eq(side)].copy()
+        if side_df.empty:
+            continue
+
+        x_numeric = [
+            session_pos[session] + side_offsets[side]
+            for session in side_df["Display Label"]
+        ]
+
+        error_y = None
+        if std_col in side_df.columns:
+            error_y = dict(
+                type="data",
+                array=side_df[std_col],
+                visible=True,
+                thickness=1.5,
+                width=6
+            )
+
+        custom_cols = ["Test", "SLJ Side", "Original Trial Numbers", "Top 3 Trials", "Best 1 Trial"]
+        customdata = (
+            side_df[custom_cols].astype(str)
+            if all(c in side_df.columns for c in custom_cols)
+            else None
+        )
+
+        fig.add_trace(go.Scatter(
+            x=x_numeric,
+            y=side_df[mean_col],
+            mode="markers",
+            name=f"{side} Mean",
+            marker=dict(size=12),
+            error_y=error_y,
+            customdata=customdata,
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Side: %{customdata[1]}<br>"
+                "Mean Top 3: %{y:.2f}<br>"
+                "Original trials: %{customdata[2]}<br>"
+                "Top 3: %{customdata[3]}<br>"
+                "Best 1: %{customdata[4]}<br>"
+                "<extra></extra>"
+            ) if customdata is not None else None
+        ))
+
+        if show_best1_trial and top1_col in side_df.columns:
+            fig.add_trace(go.Scatter(
+                x=x_numeric,
+                y=side_df[top1_col],
+                mode="markers",
+                name=f"{side} Top1",
+                marker=dict(size=10, symbol="diamond"),
+                hovertemplate=(
+                    f"<b>{side} Top1</b><br>"
+                    "Value: %{y:.2f}<br>"
+                    "<extra></extra>"
+                )
+            ))
+
+    fig.update_layout(
+        title=f"{metric} - SLJ Left vs Right",
+        xaxis_title="Session",
+        yaxis_title=metric,
+        hovermode="closest",
+        template="plotly_white",
+        height=500,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        font=dict(color="black"),
+        title_font=dict(color="black"),
+        legend=dict(font=dict(color="black"))
+    )
+
+    fig.update_xaxes(
+        tickmode="array",
+        tickvals=list(range(len(sessions))),
+        ticktext=sessions,
+        range=[-0.5, len(sessions) - 0.5],
+        title_font=dict(color="black"),
+        tickfont=dict(color="black")
+    )
+
+    fig.update_yaxes(
+        title_font=dict(color="black"),
+        tickfont=dict(color="black")
+    )
+
+    return fig
+
+
+def create_slj_trial_left_right_chart(trials_df, metric):
+    if metric not in trials_df.columns:
+        return None
+
+    df = trials_df.copy()
+    df[metric] = pd.to_numeric(df[metric], errors="coerce")
+    df = df.dropna(subset=[metric])
+
+    if df.empty:
+        return None
+
+    rows = []
+    for idx, value in df[metric].items():
+        label = str(idx)
+
+        if " - Left" in label:
+            side = "Left"
+            trial_number = label.replace(" - Left", "")
+        elif " - Right" in label:
+            side = "Right"
+            trial_number = label.replace(" - Right", "")
+        else:
+            side = "Unknown"
+            trial_number = label
+
+        rows.append({
+            "Trial": trial_number,
+            "Side": side,
+            "Value": value,
+            "Label": label
+        })
+
+    plot_df = pd.DataFrame(rows)
+    plot_df = plot_df[plot_df["Side"].isin(["Left", "Right"])]
+
+    if plot_df.empty:
+        return None
+
+    trials = plot_df["Trial"].drop_duplicates().tolist()
+    trial_pos = {trial: i for i, trial in enumerate(trials)}
+
+    side_offsets = {
+        "Left": -0.12,
+        "Right": 0.12,
+    }
+
+    fig = go.Figure()
+
+    for side in ["Left", "Right"]:
+        side_df = plot_df[plot_df["Side"].eq(side)].copy()
+
+        if side_df.empty:
+            continue
+
+        x_numeric = [
+            trial_pos[trial] + side_offsets[side]
+            for trial in side_df["Trial"]
+        ]
+
+        fig.add_trace(go.Scatter(
+            x=x_numeric,
+            y=side_df["Value"],
+            mode="markers",
+            name=side,
+            marker=dict(size=12),
+            customdata=side_df[["Label", "Side"]].astype(str),
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Side: %{customdata[1]}<br>"
+                "Value: %{y:.2f}<br>"
+                "<extra></extra>"
+            )
+        ))
+
+    for side, color in [("Left", "blue"), ("Right", "red")]:
+        side_values = plot_df.loc[
+            plot_df["Side"] == side,
+            "Value"
+        ]
+
+        if len(side_values) == 0:
+            continue
+
+        avg_value = side_values.mean()
+
+        fig.add_hline(
+            y=avg_value,
+            line_dash="dash",
+            line_color=color,
+            annotation_text=f"{side} Avg: {avg_value:.2f}",
+            annotation_position="top left"
+        )
+
+    fig.update_layout(
+        title=f"{metric} - SLJ Left vs Right trials",
+        xaxis_title="Trial",
+        yaxis_title=metric,
+        hovermode="closest",
+        template="plotly_white",
+        height=500,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        font=dict(color="black"),
+        title_font=dict(color="black"),
+        legend=dict(font=dict(color="black"))
+    )
+
+    fig.update_xaxes(
+        tickmode="array",
+        tickvals=list(range(len(trials))),
+        ticktext=trials,
+        range=[-0.5, len(trials) - 0.5],
+        title_font=dict(color="black"),
+        tickfont=dict(color="black")
+    )
+
+    fig.update_yaxes(
+        title_font=dict(color="black"),
+        tickfont=dict(color="black")
+    )
+
+    return fig

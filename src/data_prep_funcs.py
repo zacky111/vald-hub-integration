@@ -50,6 +50,54 @@ def prepare_tests_for_comparison(tests_details_all, selected_metrics=None, use_a
         if not isinstance(test_trials, list) or not test_trials:
             continue
 
+        if test_type == "SLJ":
+            slj_trial_sides = test_obj.get("slj_trial_sides", [])
+
+            side_groups = {
+                "Left": [],
+                "Right": [],
+                "Unknown": [],
+            }
+
+            for trial_index, trial in enumerate(test_trials):
+                side = slj_trial_sides[trial_index] if trial_index < len(slj_trial_sides) else "Unknown"
+
+                if side not in ["Left", "Right"]:
+                    side = "Unknown"
+
+                trial_copy = trial.copy()
+                trial_copy["_original_trial_number"] = trial_index + 1
+
+                side_groups[side].append(trial_copy)
+                
+            for side, side_trials in side_groups.items():
+                if not side_trials:
+                    continue
+
+                side_test_obj = {
+                    **test_obj,
+                    "test_type": "SLJ_SIDE",
+                    "trials": side_trials,
+                }
+
+                side_summary_df, side_trials_data = prepare_tests_for_comparison(
+                    [side_test_obj],
+                    selected_metrics=selected_metrics,
+                    use_all_metrics=use_all_metrics
+                )
+
+                if side_summary_df is not None and not side_summary_df.empty:
+                    row = side_summary_df.iloc[0].to_dict()
+                    row["Test"] = f"{test_label} - {side}"
+                    row["Test Type"] = "SLJ"
+                    row["SLJ Side"] = side
+                    summary_rows.append(row)
+
+                    for key, value in side_trials_data.items():
+                        trials_data_per_test[f"{test_label} - {side}"] = value
+
+            continue
+
         comp_df = build_comparison_df_for_test_trials(test_trials)
 
         if comp_df.empty:
@@ -122,6 +170,10 @@ def prepare_tests_for_comparison(tests_details_all, selected_metrics=None, use_a
             "Recorded Date UTC": recorded_date_utc,
             "Modified Date UTC": modified_date_utc,
             "Plot Date": parsed_date,
+            "Original Trial Numbers": ", ".join([
+                str(trial.get("_original_trial_number", i + 1))
+                for i, trial in enumerate(test_trials)
+            ]),
             "Top 3 Trials": ", ".join(top3_indices),
             "Best 1 Trial": top1_index[0] if top1_index else None,
             "Best Jump Height": trials_df.loc[top3_indices[0], jump_height_metric] if jump_height_metric and top3_indices else None,
@@ -399,7 +451,8 @@ def build_comparison_df_for_test_trials(test_trials):
     comparison_data = {}
 
     for i, trial in enumerate(test_trials):
-        trial_id = f"Trial {i + 1}"
+        original_trial_number = trial.get("_original_trial_number", i + 1)
+        trial_id = f"Trial {original_trial_number}"
 
         if "results" not in trial:
             continue
@@ -784,3 +837,94 @@ def detect_movement_onset_events(
     bw_final = float(np.median(bw_estimates)) if bw_estimates else estimate_bodyweight(df["total"])
 
     return onset_indices, bw_final
+
+
+def get_trial_side(trial: dict):
+    """
+    Próbuje wykryć, czy trial w SLJ był na lewej czy prawej nodze.
+    Obsługuje kilka możliwych nazw pól z API + fallback po limb w results.
+    """
+    possible_keys = [
+        "limb", "side", "leg", "trialSide", "testSide",
+        "jumpLeg", "movementSide", "laterality"
+    ]
+
+    for key in possible_keys:
+        value = trial.get(key)
+        if value:
+            value = str(value).strip().lower()
+            if value in ["left", "l"]:
+                return "Left"
+            if value in ["right", "r"]:
+                return "Right"
+
+    result_limbs = {
+        str(r.get("limb", "")).strip()
+        for r in trial.get("results", [])
+        if r.get("limb")
+    }
+
+    if "Left" in result_limbs and "Right" not in result_limbs:
+        return "Left"
+
+    if "Right" in result_limbs and "Left" not in result_limbs:
+        return "Right"
+
+    return None
+
+
+def find_jump_height_column_for_limb(df: pd.DataFrame, limb: str):
+    preferred = f"Jump Height (Imp-Mom) - {limb}"
+    if preferred in df.columns:
+        return preferred
+
+    candidates = [
+        c for c in df.columns
+        if "Jump Height" in str(c) and str(c).endswith(f" - {limb}")
+    ]
+    if candidates:
+        return candidates[0]
+
+    return find_jump_height_column(df)
+
+
+def detect_slj_trial_sides_from_raw(raw_data: dict):
+    df = parse_forcedeck_raw_data(raw_data)
+    sampling_frequency = int(raw_data.get("samplingFrequency", 1000))
+
+    takeoff_indices, bw = detect_takeoff_events(
+        df,
+        sampling_frequency=sampling_frequency
+    )
+
+    sides = []
+
+    for takeoff_idx in takeoff_indices:
+        onset_idx = find_movement_onset_before_takeoff(
+            df,
+            takeoff_idx=takeoff_idx,
+            sampling_frequency=sampling_frequency,
+            search_back_ms=1500,
+            baseline_ms=300,
+            min_onset_duration_ms=30,
+            std_multiplier=5.0,
+            min_absolute_change_n=20.0
+        )
+
+        trial_df = extract_trial_aligned_to_takeoff(
+            df,
+            takeoff_idx=onset_idx,
+            pre_ms=100,
+            post_ms=1200,
+            sampling_frequency=sampling_frequency
+        )
+
+        left_impulse = float(trial_df["left"].clip(lower=0).sum())
+        right_impulse = float(trial_df["right"].clip(lower=0).sum())
+
+        if left_impulse > right_impulse:
+            sides.append("Left")
+        else:
+            sides.append("Right")
+
+    return sides

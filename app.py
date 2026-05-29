@@ -11,16 +11,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.vald_client import ValdHubClient
 
-from src.visualizations import create_metrics_comparison_chart, create_limb_asymmetry_charts, create_raw_force_plot
-from src.visualizations import create_mean_std_chart, create_left_right_chart, create_overlay_trials_chart
+from src.visualizations import create_metrics_comparison_chart, create_limb_asymmetry_charts, create_raw_force_plot, create_slj_left_right_summary_chart
+from src.visualizations import create_mean_std_chart, create_left_right_chart, create_overlay_trials_chart, create_slj_trial_left_right_chart
 
-from src.data_prep_funcs import parse_excluded_tests, group_metrics_by_base, normalize_metric_name, split_metric_and_limb, extract_metric_record, extract_available_metrics_from_tests, resolve_category_metrics_for_test_type, build_comparison_df_for_test_trials, find_jump_height_column, prepare_tests_for_comparison, get_all_trial_metric_names, parse_forcedeck_raw_data
+from src.data_prep_funcs import parse_excluded_tests, group_metrics_by_base, normalize_metric_name, split_metric_and_limb, extract_metric_record, extract_available_metrics_from_tests, resolve_category_metrics_for_test_type, build_comparison_df_for_test_trials, find_jump_height_column, prepare_tests_for_comparison, get_all_trial_metric_names, parse_forcedeck_raw_data, detect_slj_trial_sides_from_raw
 from src.data_prep_funcs import detect_movement_onset_events, prepare_overlay_trial, extract_trial_aligned_to_takeoff, find_movement_onset_before_takeoff, detect_takeoff_events, estimate_bodyweight
 
 from src.metric_categories import TEST_TYPE_METRIC_CATEGORIES
 
 
-APP_VERSION = "1.5.4"
+APP_VERSION = "1.6.1"
 
 @st.cache_resource
 def get_vald_client():
@@ -318,6 +318,25 @@ def main():
                                 st.session_state.overview_test_recorded_date = selected_test.get('recordedDateUtc')
                                 st.session_state.overview_test_type = selected_test.get('testType')
 
+                                slj_raw_data = None
+                                slj_trial_sides = []
+
+                                if selected_test.get("testType") == "SLJ":
+                                    try:
+                                        slj_raw_data = client.get_raw_data(
+                                            tenant_id,
+                                            test_id,
+                                            True
+                                        )
+                                        slj_trial_sides = detect_slj_trial_sides_from_raw(slj_raw_data)
+                                        print(f"Detected SLJ trial sides: {slj_trial_sides}")
+                                    except Exception as e:
+                                        st.warning(f"Could not detect SLJ trial sides from raw data: {e}")
+                                        slj_trial_sides = []
+
+                                st.session_state.overview_slj_trial_sides = slj_trial_sides
+                                st.session_state.overview_slj_raw_data = slj_raw_data
+
                                 # reset selection state for newly loaded test
                                 if test_id not in st.session_state.overview_selected_metrics:
                                     st.session_state.overview_selected_metrics[test_id] = []
@@ -445,7 +464,13 @@ def main():
 
                             comparison_data = {}
                             for i, trial in enumerate(specific_test_details):
-                                trial_id = f"Trial {i+1}"
+                                slj_trial_sides = st.session_state.get("overview_slj_trial_sides", [])
+
+                                if current_test_type == "SLJ" and i < len(slj_trial_sides):
+                                    trial_id = f"Trial {i+1} - {slj_trial_sides[i]}"
+                                else:
+                                    trial_id = f"Trial {i+1}"
+
                                 if 'results' in trial:
                                     results = trial['results']
                                     for r in results:
@@ -497,43 +522,159 @@ def main():
                                     std_best3 = trials_df.loc[top3_indices].std(numeric_only=True) if top3_indices else pd.Series()
                                     cv_best3 = (std_best3 / avg_best3.replace(0, pd.NA)) * 100 if not avg_best3.empty else pd.Series()
 
-                                    table_df = trials_df.copy()
-                                    table_df.loc['Average'] = average_all
-                                    table_df.loc['Std'] = std_all
-                                    table_df.loc['CV (%)'] = cv_all
-                                    table_df.loc['Average from Best 3'] = avg_best3
-                                    table_df.loc['Std Best 3'] = std_best3
-                                    table_df.loc['CV Best 3 (%)'] = cv_best3
+                                    if current_test_type == "SLJ":
+                                        left_trials = [idx for idx in trials_df.index if str(idx).endswith(" - Left")]
+                                        right_trials = [idx for idx in trials_df.index if str(idx).endswith(" - Right")]
 
-                                    def _style_rows(row):
-                                        if row.name == best_trial:
-                                            return ['background-color: #28A028; color: #FFFFFF'] * len(row)
-                                        if row.name in top3_indices:
-                                            return ['background-color: #90EE90; color: #000000'] * len(row)
-                                        if row.name in ['Average', 'Average from Best 3']:
-                                            return ['background-color: #FFD700; color: #000000'] * len(row)
-                                        if row.name in ['Std', 'Std Best 3', 'CV (%)', 'CV Best 3 (%)']:
-                                            return ['background-color: #ADD8E6; color: #000000'] * len(row)
-                                        return [''] * len(row)
+                                        left_df = trials_df.loc[left_trials].copy()
+                                        right_df = trials_df.loc[right_trials].copy()
+
+                                        left_top3 = []
+                                        right_top3 = []
+
+                                        if jump_height_col and jump_height_col in trials_df.columns:
+                                            if not left_df.empty:
+                                                left_values = left_df[jump_height_col].dropna()
+                                                left_top3 = left_values.nlargest(min(3, len(left_values))).index.tolist()
+
+                                            if not right_df.empty:
+                                                right_values = right_df[jump_height_col].dropna()
+                                                right_top3 = right_values.nlargest(min(3, len(right_values))).index.tolist()
+
+                                        table_df = trials_df.copy()
+
+                                        if not left_df.empty:
+                                            table_df.loc["Average Left"] = left_df.mean(numeric_only=True)
+                                            table_df.loc["Std Left"] = left_df.std(numeric_only=True)
+                                            table_df.loc["CV (%) Left"] = (
+                                                left_df.std(numeric_only=True) / left_df.mean(numeric_only=True).replace(0, pd.NA)
+                                            ) * 100
+
+                                        if left_top3:
+                                            left_best3_df = trials_df.loc[left_top3]
+                                            table_df.loc["Average from Best 3 Left"] = left_best3_df.mean(numeric_only=True)
+                                            table_df.loc["Std Best 3 Left"] = left_best3_df.std(numeric_only=True)
+                                            table_df.loc["CV Best 3 (%) Left"] = (
+                                                left_best3_df.std(numeric_only=True) / left_best3_df.mean(numeric_only=True).replace(0, pd.NA)
+                                            ) * 100
+
+                                        if not right_df.empty:
+                                            table_df.loc["Average Right"] = right_df.mean(numeric_only=True)
+                                            table_df.loc["Std Right"] = right_df.std(numeric_only=True)
+                                            table_df.loc["CV (%) Right"] = (
+                                                right_df.std(numeric_only=True) / right_df.mean(numeric_only=True).replace(0, pd.NA)
+                                            ) * 100
+
+                                        if right_top3:
+                                            right_best3_df = trials_df.loc[right_top3]
+                                            table_df.loc["Average from Best 3 Right"] = right_best3_df.mean(numeric_only=True)
+                                            table_df.loc["Std Best 3 Right"] = right_best3_df.std(numeric_only=True)
+                                            table_df.loc["CV Best 3 (%) Right"] = (
+                                                right_best3_df.std(numeric_only=True) / right_best3_df.mean(numeric_only=True).replace(0, pd.NA)
+                                            ) * 100
+
+                                    else:
+                                        table_df = trials_df.copy()
+                                        table_df.loc['Average'] = average_all
+                                        table_df.loc['Std'] = std_all
+                                        table_df.loc['CV (%)'] = cv_all
+                                        table_df.loc['Average from Best 3'] = avg_best3
+                                        table_df.loc['Std Best 3'] = std_best3
+                                        table_df.loc['CV Best 3 (%)'] = cv_best3
+
+                                    if current_test_type == "SLJ":
+                                        left_trials = [idx for idx in trials_df.index if str(idx).endswith(" - Left")]
+                                        right_trials = [idx for idx in trials_df.index if str(idx).endswith(" - Right")]
+
+                                        left_top3 = []
+                                        right_top3 = []
+                                        left_best = None
+                                        right_best = None
+
+                                        if jump_height_col and jump_height_col in trials_df.columns:
+                                            left_values = trials_df.loc[left_trials, jump_height_col].dropna()
+                                            right_values = trials_df.loc[right_trials, jump_height_col].dropna()
+
+                                            if not left_values.empty:
+                                                left_top3 = left_values.nlargest(min(3, len(left_values))).index.tolist()
+                                                left_best = left_top3[0]
+
+                                            if not right_values.empty:
+                                                right_top3 = right_values.nlargest(min(3, len(right_values))).index.tolist()
+                                                right_best = right_top3[0]
+
+                                        def _style_rows(row):
+                                            row_name = str(row.name)
+
+                                            if row_name == left_best:
+                                                return ['background-color: #1565C0; color: #FFFFFF'] * len(row)  # dark blue
+                                            if row_name in left_top3:
+                                                return ['background-color: #BBDEFB; color: #000000'] * len(row)  # light blue
+
+                                            if row_name == right_best:
+                                                return ['background-color: #C62828; color: #FFFFFF'] * len(row)  # dark red
+                                            if row_name in right_top3:
+                                                return ['background-color: #FFCDD2; color: #000000'] * len(row)  # light red
+
+                                            if row_name in ['Average Left', 'Average from Best 3 Left']:
+                                                return ['background-color: #90CAF9; color: #000000'] * len(row)
+
+                                            if row_name in ['Average Right', 'Average from Best 3 Right']:
+                                                return ['background-color: #EF9A9A; color: #000000'] * len(row)
+
+                                            if row_name in ['Std Left', 'Std Best 3 Left', 'CV (%) Left', 'CV Best 3 (%) Left']:
+                                                return ['background-color: #E3F2FD; color: #000000'] * len(row)
+
+                                            if row_name in ['Std Right', 'Std Best 3 Right', 'CV (%) Right', 'CV Best 3 (%) Right']:
+                                                return ['background-color: #FFEBEE; color: #000000'] * len(row)
+
+                                            return [''] * len(row)
+
+                                    else:
+                                        def _style_rows(row):
+                                            if row.name == best_trial:
+                                                return ['background-color: #28A028; color: #FFFFFF'] * len(row)
+                                            if row.name in top3_indices:
+                                                return ['background-color: #90EE90; color: #000000'] * len(row)
+                                            if row.name in ['Average', 'Average from Best 3']:
+                                                return ['background-color: #FFD700; color: #000000'] * len(row)
+                                            if row.name in ['Std', 'Std Best 3', 'CV (%)', 'CV Best 3 (%)']:
+                                                return ['background-color: #ADD8E6; color: #000000'] * len(row)
+                                            return [''] * len(row)
 
                                     with st.expander("Metrics Comparison Across Trials", expanded=False):
                                         st.subheader("Metrics Comparison Across Trials")
                                         styled_table = table_df.style.apply(_style_rows, axis=1)
                                         st.dataframe(styled_table, width="stretch")
 
-                                        st.markdown("""
-                                        **Colors legend:**
-                                        - 🟩 **Dark Green** - best trial
-                                        - 🟩 **Light Green** - top 3 trials
-                                        - 🟨 **Gold** - average values
-                                        - 🟦 **Light Blue** - standard deviations and CV
-                                        """)
+                                        if current_test_type == "SLJ":
+                                            st.markdown("""
+                                            **Colors legend:**
+                                            - 🔵 **Dark Blue** - best left trial
+                                            - 🔵 **Light Blue** - top 3 left trials
+                                            - 🔴 **Dark Red** - best right trial
+                                            - 🔴 **Light Red** - top 3 right trials
+                                            - 🟦 **Pale Blue** - left average / std / CV rows
+                                            - 🟥 **Pale Red** - right average / std / CV rows
+                                            """)
+                                        else:
+                                            st.markdown("""
+                                            **Colors legend:**
+                                            - 🟩 **Dark Green** - best trial
+                                            - 🟩 **Light Green** - top 3 trials
+                                            - 🟨 **Gold** - average values
+                                            - 🟦 **Light Blue** - standard deviations and CV
+                                            """)
 
                                     with st.expander("Visualize Metrics Across Trials", expanded=False):
                                         st.subheader("Comparison Visualizations")
                                         for metric in selected_overview_metrics:
                                             if metric in trials_df.columns:
-                                                fig = create_metrics_comparison_chart(trials_df, metric)
+                                                if current_test_type == "SLJ":
+                                                    fig = create_slj_trial_left_right_chart(trials_df, metric)
+                                                else:
+                                                    fig = create_metrics_comparison_chart(trials_df, metric)
+
                                                 if fig:
                                                     st.plotly_chart(fig, width="stretch")
                                 else:
@@ -764,6 +905,20 @@ def main():
                         for index, test_obj in enumerate(selected_tests):
                             test_id = test_obj.get("testId")
                             tenant_id = test_obj.get("tenantId")
+                            raw_data = None
+                            slj_trial_sides = []
+
+                            if test_obj.get("testType") == "SLJ":
+                                try:
+                                    raw_data = client.get_raw_data(
+                                        tenant_id,
+                                        test_id,
+                                        True
+                                    )
+                                    slj_trial_sides = detect_slj_trial_sides_from_raw(raw_data)
+                                except Exception as e:
+                                    st.warning(f"Could not load or process raw data for SLJ test {test_id}: {e}")
+
 
                             specific_test_details = client.get_test_details(
                                 teamId=tenant_id,
@@ -777,7 +932,9 @@ def main():
                                     "recorded_date_utc": test_obj.get("recordedDateUtc"),
                                     "modified_date_utc": test_obj.get("modifiedDateUtc"),
                                     "test_type": test_obj.get("testType"),
-                                    "trials": specific_test_details
+                                    "trials": specific_test_details,
+                                    "raw_data": raw_data,
+                                    "slj_trial_sides": slj_trial_sides,
                                 })
 
                                 progress_bar.progress(
@@ -968,6 +1125,23 @@ def main():
 
                                     for base_metric, metric_map in grouped_metrics.items():
 
+                                        if type_of_test == "SLJ" and "Trial" in metric_map:
+                                            metric = metric_map["Trial"]
+
+                                            fig = create_slj_left_right_summary_chart(
+                                                st.session_state.prepared_summary_data,
+                                                metric,
+                                                use_time_axis=st.session_state.use_time_axis,
+                                                show_trendline=st.session_state.show_trendline,
+                                                show_best1_trial=st.session_state.add_best1_visualization
+                                            )
+
+                                            if fig:
+                                                st.plotly_chart(fig, width="stretch", key=f"{category}_{base_metric}_slj_lr")
+                                                plotted_any = True
+
+                                            continue
+
                                         # jeśli mamy Left + Right -> jeden wspólny wykres
                                         # ale tylko poza kategorią Asymmetry
                                         if category != "Asymmetry" and "Left" in metric_map and "Right" in metric_map:
@@ -986,13 +1160,22 @@ def main():
 
                                             # opcjonalnie dalej pokaż Trial osobno, jeśli istnieje
                                             if "Trial" in metric_map and category != "Asymmetry":
-                                                fig = create_mean_std_chart(
-                                                    st.session_state.prepared_summary_data,
-                                                    metric_map["Trial"],
-                                                    use_time_axis=st.session_state.use_time_axis,
-                                                    show_trendline=st.session_state.show_trendline,
-                                                    show_best1_trial=st.session_state.add_best1_visualization
-                                                )
+                                                if type_of_test == "SLJ":
+                                                    fig = create_slj_left_right_summary_chart(
+                                                        st.session_state.prepared_summary_data,
+                                                        metric,
+                                                        use_time_axis=st.session_state.use_time_axis,
+                                                        show_trendline=st.session_state.show_trendline,
+                                                        show_best1_trial=st.session_state.add_best1_visualization
+                                                    )
+                                                else:
+                                                    fig = create_mean_std_chart(
+                                                        st.session_state.prepared_summary_data,
+                                                        metric,
+                                                        use_time_axis=st.session_state.use_time_axis,
+                                                        show_trendline=st.session_state.show_trendline,
+                                                        show_best1_trial=st.session_state.add_best1_visualization
+                                                    )
                                                 if fig:
                                                     st.plotly_chart(fig, width="stretch", key=f"{category}_{base_metric}_trial")
                                                     plotted_any = True

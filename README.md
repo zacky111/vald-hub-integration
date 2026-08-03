@@ -3,7 +3,22 @@
 A **Streamlit-based performance monitoring dashboard** for Vald Hub athlete data. The app fetches real-time data from the Vald Hub API and presents it in a clean, interactive UI focused on **force plate metrics analysis**.
 
 ## What is Vald Hub
-tu opis czym są force decks, jak działają itd. 
+
+[VALD Hub](https://vald.com/) is a cloud-based platform used for collecting, storing, and analysing data from VALD performance measurement systems. It allows integration of different measurement devices and provides tools for monitoring athlete performance.
+
+This application uses data collected from **ForceDecks** systems, which are dual force plate devices designed to measure ground reaction forces during different types of movements, such as jumps, balance tests, and strength assessments.
+
+ForceDecks record the forces applied by the athlete onto the platforms with high temporal resolution. Based on these measurements, various biomechanical metrics can be calculated, including:
+
+- peak force,
+- relative force,
+- impulse,
+- rate of force development (RFD),
+- time-related parameters,
+- asymmetry between left and right limb.
+
+The collected force-time signals are uploaded to Vald Hub, where they can be analysed and accessed through the platform. This application retrieves the stored measurements and provides additional tools for visualisation, comparison, and analysis of training sessions.
+
 ![title](src/images/fd_image.png)
 
 ## What This App Does

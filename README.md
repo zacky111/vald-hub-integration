@@ -2,7 +2,9 @@
 
 A **Streamlit-based performance monitoring dashboard** for Vald Hub athlete data. The app fetches real-time data from the Vald Hub API and presents it in a clean, interactive UI focused on **force plate metrics analysis**.
 
----
+## What is Vald Hub
+tu opis czym są force decks, jak działają itd. 
+![title](src/images/fd_image.png)
 
 ## What This App Does
 
@@ -14,36 +16,78 @@ This dashboard is designed to help analyze athlete performance data with a stron
 * **Left vs Right & Asymmetry tracking**
 * **Full metric exploration (100+ metrics supported)**
 
----
 
 ## App overview
 
+The application provides tools for analysing and comparing athlete training data retrieved from the connected Vald Hub account. The interface is divided into three main analysis modes: single training overview, multiple training comparison, and comparison of individual trials across different training sessions.
+
 ### 1. Main Dashboard View
 
+The dashboard is the main entry point of the application.
+
+From this view, the user can:
+- select an athlete from the list retrieved from the connected Vald Hub account,
+- view basic athlete information, including date of birth,
+- choose one of the available analysis modes:
+  - overview of a single training session,
+  - comparison of multiple training sessions,
+  - comparison of individual trials from different sessions.
 
 ![title](src/images/overview.png)
-### 2. Athlete Analysis
 
-*Show dropdown + individual athlete charts*
 
-```
-/docs/screenshots/athlete_analysis.png
-```
+### 2. Mode: *Overview - Single Training*
 
-### 3. Metric Categories View
+This mode allows detailed analysis of a selected training session.
 
-*Show grouped metrics (Output, Eccentric, etc.)*
+The workflow consists of:
+- loading all available sessions for the selected athlete,
+- selecting the training session to analyse,
+- choosing the metrics to be displayed,
+- calculating the selected parameters and generating visualisations.
 
-```
-/docs/screenshots/metric_categories.png
-```
+The results are presented as interactive charts allowing detailed inspection of the selected training data.
 
-### 4. Asymmetry / Left vs Right Charts
+![title](src/images/image2.png)
+![title](src/images/image3.png)
+![title](src/images/image4.png)
+![title](src/images/image5.png)
 
-```
-/docs/screenshots/asymmetry_chart.png
-```
 
+### 3. Mode: *Multiple Trainings Comparison*
+
+This mode enables comparison of results across multiple training sessions.
+
+The user can:
+- select the training type,
+- define the analysed date range,
+- select specific training indices,
+- exclude sessions that may introduce unwanted distortions into the analysis (e.g. sessions affected by injuries or abnormal conditions),
+- choose the metrics to compare.
+
+After data preparation, the application generates comparative visualisations for the selected sessions.
+
+![title](src/images/image6.png)
+![title](src/images/image7.png)
+![title](src/images/image8.png)
+![title](src/images/image9.png)
+
+
+### 4. Mode: *Comparison Across Different Trials*
+
+This mode allows comparison of individual trials recorded during different training sessions.
+
+The workflow includes:
+- entering the test number obtained from the multiple training comparison view,
+- loading the corresponding trial data,
+- selecting the trials to display,
+- adjusting visualisation parameters, such as signal shift and analysed leg.
+
+The final visualisation enables direct comparison of selected trials from different training sessions.
+
+![title](src/images/image10.png)
+![title](src/images/image11.png)
+![title](src/images/image12.png)
 
 ## Configuration
 
